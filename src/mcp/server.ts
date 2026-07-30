@@ -1,0 +1,166 @@
+import readline from 'node:readline';
+
+/**
+ * A dependency-free MCP stdio server. It holds no cookies itself: every tool
+ * call goes to the local cookiejar daemon with the bundle token, so the vault
+ * has to be unlocked for anything to work.
+ */
+export interface McpOptions {
+  daemonUrl: string;
+  token: string;
+  stdin?: NodeJS.ReadableStream;
+  stdout?: NodeJS.WritableStream;
+}
+
+interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: number | string;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+const TOOLS = [
+  {
+    name: 'describe_bundle',
+    description:
+      'Describe the cookie bundle this session can use: its name, the hosts it is authenticated for, and what the token is allowed to do.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'get_cookie_header',
+    description:
+      'Return the Cookie header value to send with a request to a URL covered by the bundle. Use this when you want to make the request yourself.',
+    inputSchema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Absolute URL the header will be sent to.' } },
+      required: ['url'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'export_cookies',
+    description:
+      'Export the bundle as a cookie jar. Formats: "netscape" (curl -b / yt-dlp / python-requests), "storage-state" (Playwright/Puppeteer), "json".',
+    inputSchema: {
+      type: 'object',
+      properties: { format: { type: 'string', enum: ['netscape', 'storage-state', 'json'] } },
+      required: ['format'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'http_request',
+    description:
+      'Perform an HTTP request against a host in the bundle with its cookies attached, without ever exposing the cookie values.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        method: { type: 'string', default: 'GET' },
+        headers: { type: 'object', additionalProperties: { type: 'string' } },
+        body: { type: 'string' },
+      },
+      required: ['url'],
+      additionalProperties: false,
+    },
+  },
+] as const;
+
+export function runMcpServer(options: McpOptions): void {
+  const input = options.stdin ?? process.stdin;
+  const output = options.stdout ?? process.stdout;
+  const rl = readline.createInterface({ input, crlfDelay: Infinity });
+  let inFlight = 0;
+  let closed = false;
+  const maybeExit = (): void => {
+    if (closed && inFlight === 0) process.exit(0);
+  };
+
+  const write = (message: unknown): void => {
+    output.write(`${JSON.stringify(message)}\n`);
+  };
+
+  const call = async (path: string, init?: RequestInit): Promise<string> => {
+    const response = await fetch(new URL(path, options.daemonUrl), {
+      ...init,
+      headers: { ...(init?.headers ?? {}), authorization: `Bearer ${options.token}`, 'content-type': 'application/json' },
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`cookiejar daemon: ${response.status} ${text}`);
+    return text;
+  };
+
+  const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    switch (name) {
+      case 'describe_bundle':
+        return call('/agent/bundle');
+      case 'get_cookie_header':
+        return call(`/agent/cookies?format=header&url=${encodeURIComponent(String(args.url))}`);
+      case 'export_cookies':
+        return call(`/agent/cookies?format=${encodeURIComponent(String(args.format))}`);
+      case 'http_request':
+        return call('/agent/fetch', { method: 'POST', body: JSON.stringify(args) });
+      default:
+        throw new Error(`unknown tool: ${name}`);
+    }
+  };
+
+  rl.on('line', (line) => {
+    if (!line.trim()) return;
+    let request: JsonRpcRequest;
+    try {
+      request = JSON.parse(line) as JsonRpcRequest;
+    } catch {
+      return;
+    }
+
+    const reply = (result: unknown): void => {
+      if (request.id === undefined) return;
+      write({ jsonrpc: '2.0', id: request.id, result });
+    };
+    const fail = (message: string): void => {
+      if (request.id === undefined) return;
+      write({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message } });
+    };
+
+    switch (request.method) {
+      case 'initialize':
+        reply({
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'cookiejar', version: '0.1.0' },
+        });
+        return;
+      case 'notifications/initialized':
+        return;
+      case 'ping':
+        reply({});
+        return;
+      case 'tools/list':
+        reply({ tools: TOOLS });
+        return;
+      case 'tools/call': {
+        const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
+        inFlight += 1;
+        void runTool(params.name ?? '', params.arguments ?? {})
+          .then((text) => reply({ content: [{ type: 'text', text }] }))
+          .catch((error: unknown) =>
+            reply({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true }),
+          )
+          .finally(() => {
+            inFlight -= 1;
+            maybeExit();
+          });
+        return;
+      }
+      default:
+        fail(`unsupported method: ${request.method}`);
+    }
+  });
+
+  // Finish any tool call already in flight before shutting down.
+  rl.on('close', () => {
+    closed = true;
+    maybeExit();
+  });
+}
