@@ -1,0 +1,35 @@
+{
+  "name": "cookiejar",
+  "version": "0.1.0",
+  "description": "Local-only cookie bundle manager: pick cookies from your browsers, group them into password-protected bundles, hand a bundle to a coding agent.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "bin": {
+    "cookiejar": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build:server && npm run build:ui",
+    "build:server": "tsc -p tsconfig.json",
+    "build:ui": "npm --prefix ui run build",
+    "dev": "node --import tsx src/cli.ts ui --dev",
+    "start": "node dist/cli.js ui",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm --prefix ui run typecheck",
+    "lint": "eslint .",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.5",
+    "eslint": "^9.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}
