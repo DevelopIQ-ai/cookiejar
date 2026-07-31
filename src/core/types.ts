@@ -28,7 +28,7 @@ export interface SourcedCookie extends Cookie {
   browser: BrowserId;
 }
 
-/** Cookie metadata without the secret, safe to render in the UI. */
+/** Cookie metadata without the secret, safe to print. */
 export interface CookieMeta extends Omit<SourcedCookie, 'value'> {
   valueLength: number;
 }
@@ -71,9 +71,17 @@ export interface Bundle {
   grants: BundleGrant[];
 }
 
+/** First-run answers from `cookiejar setup`. */
+export interface Preferences {
+  /** Browsers the user said they use, e.g. ['chrome', 'safari']. */
+  browsers: BrowserId[];
+  onboardedAt: string | null;
+}
+
 export interface VaultData {
   version: 1;
   bundles: Bundle[];
+  preferences?: Preferences;
 }
 
 export interface AuditEntry {

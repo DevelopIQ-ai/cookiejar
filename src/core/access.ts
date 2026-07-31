@@ -16,7 +16,7 @@ export interface Grantee {
  */
 export function authorize(vault: Vault, token: string | undefined): Grantee {
   if (!token) throw new AccessDeniedError('missing bundle token');
-  if (!vault.unlocked) throw new AccessDeniedError('cookiejar is locked; unlock it in the app first');
+  if (!vault.unlocked) throw new AccessDeniedError('cookiejar is locked; start it with `cookiejar serve`');
   const now = Date.now() / 1000;
   for (const bundle of vault.read().bundles) {
     for (const grant of bundle.grants) {

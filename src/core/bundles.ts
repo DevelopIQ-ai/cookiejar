@@ -25,7 +25,8 @@ export function cookieAppliesToPath(cookie: Cookie, pathname: string): boolean {
   return cookiePath.endsWith('/') || pathname.length === cookiePath.length || pathname[cookiePath.length] === '/';
 }
 
-export const isExpired = (cookie: Cookie, now = Date.now() / 1000): boolean => cookie.expires !== 0 && cookie.expires < now;
+export const isExpired = (cookie: Pick<Cookie, 'expires'>, now = Date.now() / 1000): boolean =>
+  cookie.expires !== 0 && cookie.expires < now;
 
 function matchesSelector(selector: CookieSelector, cookie: SourcedCookie): boolean {
   if (cookie.profileId !== selector.profileId) return false;

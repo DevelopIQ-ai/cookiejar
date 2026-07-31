@@ -35,12 +35,10 @@
     "cli"
   ],
   "scripts": {
-    "build": "npm run build:server && npm run build:ui",
-    "build:server": "tsc -p tsconfig.json",
-    "build:ui": "npm --prefix ui run build",
-    "dev": "node --import tsx src/cli.ts ui --dev",
-    "start": "node dist/cli.js ui",
-    "typecheck": "tsc -p tsconfig.json --noEmit && npm --prefix ui run typecheck",
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --import tsx src/cli.ts",
+    "start": "node dist/cli.js serve",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
