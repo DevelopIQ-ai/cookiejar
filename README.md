@@ -1,5 +1,9 @@
 # cookiejar
 
+[![npm](https://img.shields.io/npm/v/@puffle/cookiejar)](https://www.npmjs.com/package/@puffle/cookiejar)
+[![CI](https://github.com/DevelopIQ-ai/cookiejar/actions/workflows/ci.yml/badge.svg)](https://github.com/DevelopIQ-ai/cookiejar/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Local-only cookie bundles for coding agents. A CLI, nothing else.**
 
 You are already logged into GitHub, Linear, Notion, your admin panels. Your agent is not, and half of
@@ -43,6 +47,44 @@ git clone https://github.com/DevelopIQ-ai/cookiejar
 cd cookiejar
 npm install && npm run build
 node dist/cli.js setup
+```
+
+## A whole session
+
+```console
+$ cookiejar setup
+Which browsers do you use? cookiejar only reads the ones you pick.
+
+  1. Chrome
+  2. Firefox
+
+Numbers, comma separated (enter = all):
+Saved: Chrome, Firefox.
+
+$ cookiejar sites
+github.com              3 cookies  chrome:Default
+linear.app              2 cookies  chrome:Default firefox:abcd1234.demo
+notion.so               2 cookies  chrome:Default
+
+$ cookiejar cookies linear.app          # names and flags only, never a value
+__session  .linear.app  chrome:Default         httpOnly secure
+__session  .linear.app  firefox:abcd1234.demo  httpOnly secure
+
+$ cookiejar bundle new "linear agent"
+created linear-agent-1d247f
+
+$ cookiejar bundle add linear-agent-1d247f linear.app --profile chrome:Default
+linear-agent-1d247f: added linear.app from chrome:Default (1 cookie, tracking all)
+
+$ cookiejar token new linear-agent-1d247f --label devin --days 7 --proxy-only
+cjr_····························
+
+6ca24d828102 · devin · expires Fri Aug 07 2026 · proxy only, values stay here
+This is the only time the token is shown. It only works while cookiejar serve is running.
+
+$ cookiejar serve
+cookiejar is answering agent tokens at http://127.0.0.1:4088
+auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 ```
 
 ## Walkthrough
@@ -170,4 +212,11 @@ Layout: `src/core` (crypto, vault, browser readers, bundle resolution, bundle/gr
 `src/cli` (commands and prompts), `src/server` (the agent daemon), `src/mcp` (stdio MCP server),
 `test`.
 
-MIT licensed. Issues and PRs welcome.
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the checks CI runs,
+and the invariants a change has to keep (no values in the vault, no values in output, no runtime
+dependencies, loopback only). Please report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+MIT licensed.

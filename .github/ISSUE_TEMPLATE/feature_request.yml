@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a command, a browser, or an agent integration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The workflow you are stuck on, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: A command sketch is ideal.
+      placeholder: "cookiejar bundle clone <id> --profile firefox:default"
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Does this keep cookiejar's invariants?
+      description: See CONTRIBUTING.md. Tick the ones your idea preserves.
+      options:
+        - label: No cookie values stored in the vault
+        - label: No cookie values printed or logged unless explicitly asked for
+        - label: No runtime dependencies, no network calls, nothing leaves the machine

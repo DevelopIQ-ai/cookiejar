@@ -13,6 +13,10 @@ process.on('warning', (warning) => {
   if (warning.name !== 'ExperimentalWarning') console.warn(`${warning.name}: ${warning.message}`);
 });
 
+const VERSION = (
+  JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
+
 const DEFAULT_PORT = Number(process.env.COOKIEJAR_PORT ?? 4088);
 const DEFAULT_URL = process.env.COOKIEJAR_URL ?? `http://127.0.0.1:${DEFAULT_PORT}`;
 
@@ -127,12 +131,19 @@ Being an agent
   cookiejar export [--bundle <id> | --token <token>] [--format netscape|storage-state|json] [--out <file>]
   cookiejar header --url-target <url> [--bundle <id> | --token <token>]
   cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}]
+
+  cookiejar version                      Print the version
 `;
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   switch (args.command) {
+    case 'version':
+    case '--version':
+    case '-v':
+      console.log(VERSION);
+      return;
     case 'serve': {
       const port = flagNumber(args, 'port', DEFAULT_PORT);
       const autoLock = flagNumber(args, 'auto-lock', 30);

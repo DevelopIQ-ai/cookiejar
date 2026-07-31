@@ -35,6 +35,7 @@ export const FULL_DISK_ACCESS = `Safari keeps its cookies in a container macOS p
   4. Run cookiejar setup again.`;
 
 const pad = (value: string, width: number): string => value.padEnd(width);
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 /** First run in the terminal: which browsers, and Safari's permission if asked for. */
 export async function setup(vault: Vault): Promise<void> {
@@ -83,9 +84,9 @@ export function doctor(): void {
   if (health.usable.length === 0) console.log('No profiles with readable cookies found.');
   for (const read of health.usable) {
     const sites = new Set(read.cookies.map((c) => bareDomain(c.domain))).size;
-    console.log(`✓ ${read.profile.label} (${read.profile.id}) — ${read.cookies.length} cookies across ${sites} sites`);
+    console.log(`✓ ${read.profile.label} (${read.profile.id}) — ${plural(read.cookies.length, 'cookie')} across ${plural(sites, 'site')}`);
   }
-  if (health.empty.length > 0) console.log(`  (${health.empty.length} profile(s) with no cookies hidden)`);
+  if (health.empty.length > 0) console.log(`  (${plural(health.empty.length, 'profile')} with no cookies hidden)`);
   if (health.blocked.some(({ profile }) => profile.browser === 'safari')) console.log(`\n${FULL_DISK_ACCESS}`);
   for (const { profile, error } of health.blocked) {
     if (profile.browser === 'safari') continue;
@@ -113,7 +114,7 @@ export function listSites(opts: { profileId?: string; filter?: string }): void {
   }
   const width = Math.max(...rows.map(([site]) => site.length));
   for (const [site, entry] of rows) {
-    console.log(`${pad(site, width)}  ${String(entry.cookies).padStart(3)} cookies  ${[...entry.profiles].join(' ')}`);
+    console.log(`${pad(site, width)}  ${String(entry.cookies).padStart(3)} ${entry.cookies === 1 ? 'cookie ' : 'cookies'}  ${[...entry.profiles].join(' ')}`);
   }
 }
 
@@ -130,11 +131,13 @@ export function listCookies(site: string, profileId?: string): void {
   const cookies = cookiesForSite(site, profileId);
   if (cookies.length === 0) throw new CliError(`no cookies for ${site}`);
   const width = Math.max(...cookies.map((cookie) => cookie.name.length));
+  const domainWidth = Math.max(...cookies.map((cookie) => cookie.domain.length));
+  const profileWidth = Math.max(...cookies.map((cookie) => cookie.profileId.length));
   for (const cookie of cookies) {
     const flags = [cookie.httpOnly ? 'httpOnly' : '', cookie.secure ? 'secure' : '', isExpired(cookie) ? 'expired' : '']
       .filter(Boolean)
       .join(' ');
-    console.log(`${pad(cookie.name, width)}  ${pad(cookie.domain, 24)} ${pad(cookie.profileId, 18)} ${flags}`);
+    console.log(`${pad(cookie.name, width)}  ${pad(cookie.domain, domainWidth)}  ${pad(cookie.profileId, profileWidth)}  ${flags}`);
   }
 }
 
@@ -147,7 +150,7 @@ export function listBundles(vault: Vault): void {
   for (const bundle of bundles) {
     const live = bundle.grants.filter((g) => !g.revokedAt).length;
     const sites = new Set(bundle.selectors.map((s) => bareDomain(s.domain))).size;
-    console.log(`${pad(bundle.id, 24)}  ${pad(bundle.name, 20)} ${sites} site(s), ${live} live token(s)`);
+    console.log(`${pad(bundle.id, 24)}  ${pad(bundle.name, 20)} ${plural(sites, 'site')}, ${plural(live, 'live token')}`);
   }
 }
 
@@ -163,7 +166,7 @@ export function showBundle(vault: Vault, bundleId: string): void {
     console.log(`  ${pad(selector.domain, 24)} ${pad(selector.profileId, 18)} ${names}`);
   }
 
-  console.log(`\nlive contents · ${resolved.cookies.length} cookies`);
+  console.log(`\nlive contents · ${plural(resolved.cookies.length, 'cookie')}`);
   for (const cookie of resolved.cookies.map(toMeta)) {
     console.log(`  ${pad(cookie.name, 24)} ${pad(cookie.domain, 24)} ${cookie.profileId}`);
   }
@@ -226,7 +229,7 @@ export async function bundleAdd(
 
   addSelector(vault, bundleId, { profileId, domain: site, names });
   const count = names.length === 0 ? inProfile.length : names.length;
-  console.log(`${bundleId}: added ${site} from ${profileId} (${count} cookie(s)${names.length === 0 ? ', tracking all' : ''})`);
+  console.log(`${bundleId}: added ${site} from ${profileId} (${plural(count, 'cookie')}${names.length === 0 ? ', tracking all' : ''})`);
 }
 
 export function bundleRemove(vault: Vault, bundleId: string, site: string, profileId?: string): void {
@@ -236,7 +239,7 @@ export function bundleRemove(vault: Vault, bundleId: string, site: string, profi
 
 export async function bundleDelete(vault: Vault, bundleId: string, force: boolean): Promise<void> {
   const bundle = vault.bundle(bundleId);
-  if (!force && !(await confirm(`Delete "${bundle.name}" and its ${bundle.grants.length} token(s)?`))) return;
+  if (!force && !(await confirm(`Delete "${bundle.name}" and its ${plural(bundle.grants.length, 'token')}?`))) return;
   deleteBundle(vault, bundleId);
   console.log(`deleted ${bundleId}`);
 }
@@ -328,7 +331,7 @@ export async function changePassword(vault: Vault, current: string): Promise<voi
 
 export function profiles(): void {
   for (const read of readAllProfiles()) {
-    const state = read.error ? read.error : `${read.cookies.length} cookies`;
+    const state = read.error ? read.error : plural(read.cookies.length, 'cookie');
     console.log(`${pad(read.profile.id, 20)} ${pad(read.profile.label, 24)} ${state}`);
   }
 }

@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in the CLI, a browser reader, or the agent daemon is wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a real cookie value or a `cjr_…` token. Redact domains you would rather not
+        share. Security vulnerabilities go through [SECURITY.md](../blob/main/SECURITY.md), not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got.
+      placeholder: |
+        $ cookiejar bundle add …
+        …
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: cookiejar doctor
+      description: Output of `cookiejar doctor` (it prints browsers and paths only, no values).
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: cookiejar version
+      placeholder: "0.2.0 (npm) or a commit sha"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS, Node, and browser
+      placeholder: "macOS 15.3, Node 22.13, Chrome 132"
+    validations:
+      required: true
