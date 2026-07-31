@@ -33,7 +33,9 @@ Requires Node 22.5+ (for the built-in SQLite reader).
 
 ```bash
 npm install -g @puffle/cookiejar
-cookiejar ui --open
+cookiejar setup      # terminal, no app needed
+# or
+cookiejar ui --open  # the same thing in a browser
 ```
 
 Or from source:
@@ -46,6 +48,33 @@ node dist/cli.js ui --open
 ```
 
 Open http://127.0.0.1:4088, choose a master password, and pick your cookies.
+
+## The app is optional
+
+Everything the app does is a command, so you never have to leave the terminal. Commands that touch
+the jar ask for your master password (or read `COOKIEJAR_PASSWORD`, for scripts).
+
+```bash
+cookiejar setup                                  # which browsers do you use? (+ Safari's permission)
+cookiejar doctor                                 # what can be read here, and why not
+cookiejar sites                                  # every site you have cookies for
+cookiejar cookies linear.app                     # names only — values are never printed
+
+cookiejar bundle new "linear agent"
+cookiejar bundle add linear-agent-9f0b73 linear.app --pick   # tick cookies, terminal style
+cookiejar bundle linear-agent-9f0b73             # selectors, live contents, tokens
+
+cookiejar token new linear-agent-9f0b73 --label devin --days 7 --proxy-only
+cookiejar share linear-agent-9f0b73              # MCP + curl config, local and cloud
+cookiejar token revoke linear-agent-9f0b73 1b027f6ab46c
+cookiejar activity                               # audit log
+```
+
+`cookiejar export --bundle <id>` and `cookiejar header --bundle <id>` read the vault directly, so
+they work with no daemon running and no token. Run `cookiejar help` for the full list.
+
+One caveat: the app keeps the decrypted jar in memory, so avoid editing from both at once — the CLI
+warns you when it sees an unlocked app on `127.0.0.1:4088`.
 
 ## Using a bundle from an agent
 

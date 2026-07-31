@@ -3,9 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { Vault, newBundleId, BadPasswordError, VaultLockedError } from '../core/vault.js';
+import { Vault, BadPasswordError, VaultLockedError } from '../core/vault.js';
 import { audit, readAudit } from '../core/audit.js';
-import { hashToken, newToken } from '../core/crypto.js';
+import {
+  createBundle,
+  deleteBundle,
+  grantId,
+  issueGrant,
+  revokeGrant,
+  setPreferences,
+  updateBundle,
+} from '../core/manage.js';
 import { installedBrowsers, profileHealth, readAllProfiles, safariAccess, toMeta } from '../core/browsers/index.js';
 import {
   bareDomain,
@@ -17,7 +25,7 @@ import {
   toStorageState,
 } from '../core/bundles.js';
 import { AccessDeniedError, authorize, noteUse } from '../core/access.js';
-import type { Bundle, BrowserId, CookieSelector, Preferences } from '../core/types.js';
+import type { Bundle, BrowserId, CookieSelector } from '../core/types.js';
 import { bearerToken, originAllowed, parseCookies, readJsonBody, sendJson } from './util.js';
 
 const SESSION_COOKIE = 'cjr_session';
@@ -74,7 +82,7 @@ export function createServer(options: ServerOptions) {
 
   const publicBundle = (bundle: Bundle) => ({
     ...bundle,
-    grants: bundle.grants.map(({ tokenHash, ...rest }) => ({ ...rest, id: tokenHash.slice(0, 12), tokenHash })),
+    grants: bundle.grants.map((grant) => ({ ...grant, id: grantId(grant) })),
   });
 
   async function handleUiApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
@@ -85,6 +93,9 @@ export function createServer(options: ServerOptions) {
       sendJson(res, 200, {
         vaultExists: vault.exists,
         unlocked: hasSession(req),
+        // The app holds the decrypted jar in memory, so the CLI can warn
+        // before an edit made in the terminal gets overwritten.
+        holdsVault: vault.unlocked,
         platform: process.platform,
         autoLockMinutes: options.autoLockMinutes ?? 30,
       });
@@ -185,13 +196,7 @@ export function createServer(options: ServerOptions) {
 
     if (route === '/api/onboarding' && method === 'POST') {
       const body = await readJsonBody<{ browsers?: string[]; done?: boolean }>(req);
-      const preferences: Preferences = {
-        browsers: (body.browsers ?? []) as BrowserId[],
-        onboardedAt: body.done ? new Date().toISOString() : null,
-      };
-      vault.write((data) => {
-        data.preferences = preferences;
-      });
+      const preferences = setPreferences(vault, (body.browsers ?? []) as BrowserId[], body.done ?? false);
       sendJson(res, 200, { preferences });
       return true;
     }
@@ -249,18 +254,7 @@ export function createServer(options: ServerOptions) {
         sendJson(res, 400, { error: 'bundle name is required' });
         return true;
       }
-      const now = new Date().toISOString();
-      const bundle: Bundle = {
-        id: newBundleId(body.name),
-        name: body.name.trim(),
-        description: body.description?.trim() ?? '',
-        createdAt: now,
-        updatedAt: now,
-        selectors: body.selectors ?? [],
-        grants: [],
-      };
-      vault.write((data) => data.bundles.push(bundle));
-      audit({ event: 'bundle_saved', bundleId: bundle.id, detail: 'created' });
+      const bundle = createBundle(vault, { name: body.name, description: body.description, selectors: body.selectors });
       sendJson(res, 200, { bundle: publicBundle(bundle) });
       return true;
     }
@@ -279,23 +273,12 @@ export function createServer(options: ServerOptions) {
 
       if (sub === '' && method === 'PUT') {
         const body = await readJsonBody<{ name?: string; description?: string; selectors?: CookieSelector[] }>(req);
-        vault.write((data) => {
-          const target = data.bundles.find((b) => b.id === bundleId)!;
-          if (body.name?.trim()) target.name = body.name.trim();
-          if (body.description !== undefined) target.description = body.description.trim();
-          if (body.selectors) target.selectors = body.selectors;
-          target.updatedAt = new Date().toISOString();
-        });
-        audit({ event: 'bundle_saved', bundleId });
-        sendJson(res, 200, { bundle: publicBundle(vault.bundle(bundleId)) });
+        sendJson(res, 200, { bundle: publicBundle(updateBundle(vault, bundleId, body)) });
         return true;
       }
 
       if (sub === '' && method === 'DELETE') {
-        vault.write((data) => {
-          data.bundles = data.bundles.filter((b) => b.id !== bundleId);
-        });
-        audit({ event: 'bundle_deleted', bundleId });
+        deleteBundle(vault, bundleId);
         sendJson(res, 200, { ok: true });
         return true;
       }
@@ -317,33 +300,19 @@ export function createServer(options: ServerOptions) {
           allowFetch?: boolean;
           redactValues?: boolean;
         }>(req);
-        const token = newToken();
-        const grant = {
-          tokenHash: hashToken(token),
-          label: body.label?.trim() || 'agent',
-          createdAt: new Date().toISOString(),
-          expiresAt: body.expiresInDays ? Math.floor(Date.now() / 1000 + body.expiresInDays * 86_400) : 0,
-          allowFetch: body.allowFetch ?? true,
-          redactValues: body.redactValues ?? false,
-          lastUsedAt: null,
-          useCount: 0,
-          revokedAt: null,
-        };
-        vault.write((data) => data.bundles.find((b) => b.id === bundleId)!.grants.push(grant));
-        audit({ event: 'grant_created', bundleId, grantLabel: grant.label });
-        sendJson(res, 200, { token, grant: { ...grant, id: grant.tokenHash.slice(0, 12) } });
+        const { token, grant } = issueGrant(vault, bundleId, body);
+        sendJson(res, 200, { token, grant: { ...grant, id: grantId(grant) } });
         return true;
       }
 
       const grantMatch = /^\/grants\/([0-9a-f]+)$/.exec(sub);
       if (grantMatch && method === 'DELETE') {
-        vault.write((data) => {
-          const grant = data.bundles
-            .find((b) => b.id === bundleId)!
-            .grants.find((g) => g.tokenHash.startsWith(grantMatch[1]));
-          if (grant) grant.revokedAt = new Date().toISOString();
-        });
-        audit({ event: 'grant_revoked', bundleId });
+        try {
+          revokeGrant(vault, bundleId, grantMatch[1]);
+        } catch {
+          sendJson(res, 404, { error: 'no such token' });
+          return true;
+        }
         sendJson(res, 200, { ok: true });
         return true;
       }

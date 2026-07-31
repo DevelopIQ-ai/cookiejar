@@ -5,8 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './server/index.js';
 import { runMcpServer } from './mcp/server.js';
-import { readAllProfiles } from './core/browsers/index.js';
-import { bareDomain } from './core/bundles.js';
+import { cookieHeaderFor, resolveBundle, toNetscape, toStorageState } from './core/bundles.js';
+import { askSecret } from './cli/prompt.js';
+import { CliError, openVault, warnIfDaemonRunning } from './cli/vault.js';
+import * as cmd from './cli/commands.js';
 
 // node:sqlite is how we read cookie stores; its experimental banner is noise here.
 process.removeAllListeners('warning');
@@ -19,27 +21,46 @@ const DEFAULT_URL = process.env.COOKIEJAR_URL ?? `http://127.0.0.1:${DEFAULT_POR
 
 interface Args {
   command: string;
+  /** Positional arguments after the command, e.g. ['add', 'my-bundle', 'linear.app']. */
+  rest: string[];
   flags: Map<string, string | boolean>;
 }
 
 function parseArgs(argv: string[]): Args {
   const flags = new Map<string, string | boolean>();
-  const [command = 'ui', ...rest] = argv;
-  for (let i = 0; i < rest.length; i++) {
-    const arg = rest[i];
-    if (!arg.startsWith('--')) continue;
+  const rest: string[] = [];
+  const [command = 'ui', ...tail] = argv;
+  for (let i = 0; i < tail.length; i++) {
+    const arg = tail[i];
+    if (!arg.startsWith('--')) {
+      rest.push(arg);
+      continue;
+    }
     const [name, inline] = arg.slice(2).split('=', 2);
     if (inline !== undefined) flags.set(name, inline);
-    else if (rest[i + 1] && !rest[i + 1].startsWith('--')) flags.set(name, rest[++i]);
+    else if (tail[i + 1] && !tail[i + 1].startsWith('--')) flags.set(name, tail[++i]);
     else flags.set(name, true);
   }
-  return { command, flags };
+  return { command, rest, flags };
 }
 
 const flagString = (args: Args, name: string, fallback?: string): string | undefined => {
   const value = args.flags.get(name);
   return typeof value === 'string' ? value : fallback;
 };
+
+const flagBool = (args: Args, name: string): boolean => args.flags.get(name) === true || args.flags.get(name) === 'true';
+
+const flagNumber = (args: Args, name: string, fallback: number): number => {
+  const value = flagString(args, name);
+  return value === undefined ? fallback : Number(value);
+};
+
+function positional(args: Args, index: number, what: string): string {
+  const value = args.rest[index];
+  if (!value) throw new CliError(`${what} is required — see cookiejar help`);
+  return value;
+}
 
 function openBrowser(url: string): void {
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
@@ -58,42 +79,70 @@ function uiDir(): string {
 
 function requireToken(args: Args): string {
   const token = flagString(args, 'token') ?? process.env.COOKIEJAR_TOKEN;
-  if (!token) {
-    console.error('A bundle token is required. Pass --token or set COOKIEJAR_TOKEN.');
-    process.exit(2);
-  }
+  if (!token) throw new CliError('A bundle token is required. Pass --token or set COOKIEJAR_TOKEN.');
   return token;
 }
 
-async function agentGet(args: Args, path: string): Promise<string> {
+async function agentGet(args: Args, route: string): Promise<string> {
   const base = flagString(args, 'url', DEFAULT_URL)!;
-  const response = await fetch(new URL(path, base), { headers: { authorization: `Bearer ${requireToken(args)}` } });
+  const response = await fetch(new URL(route, base), { headers: { authorization: `Bearer ${requireToken(args)}` } });
   const text = await response.text();
-  if (!response.ok) {
-    console.error(text);
-    process.exit(1);
-  }
+  if (!response.ok) throw new CliError(text);
   return text;
+}
+
+/**
+ * Reads a bundle straight out of the vault, so `export`/`header` work with no
+ * daemon and no token: the terminal is a first-class client, not a fallback.
+ */
+async function localBundleCookies(bundleId: string) {
+  const vault = await openVault();
+  return resolveBundle(vault.bundle(bundleId)).cookies;
+}
+
+/** Opens the vault for a command that writes, warning if the app could clobber it. */
+async function openForWrite(): Promise<Awaited<ReturnType<typeof openVault>>> {
+  await warnIfDaemonRunning(DEFAULT_URL);
+  return openVault();
 }
 
 const HELP = `cookiejar — local-only cookie bundles for coding agents
 
-Usage:
-  cookiejar ui [--port ${DEFAULT_PORT}] [--open] [--auto-lock <minutes>]
-      Start the local app (127.0.0.1 only) to manage cookies and bundles.
+Everything the app can do, the terminal can do. Commands that touch the jar ask for
+your master password (or read COOKIEJAR_PASSWORD).
 
+Setting up
+  cookiejar setup                        Pick your browsers; explains Safari's permission
+  cookiejar status                       Where the jar is, what is readable, what exists
+  cookiejar doctor                       Which browser profiles can be read, and why not
+  cookiejar profiles                     Every discovered profile, including empty ones
+  cookiejar passwd                       Change the master password
+
+Picking cookies
+  cookiejar sites [--profile <id>] [--filter <text>]
+  cookiejar cookies <site> [--profile <id>]        Names only — values are never printed
+
+Bundles
+  cookiejar bundles                                List bundles
+  cookiejar bundle <id>                            Selectors, live cookies, tokens
+  cookiejar bundle new <name> [--description <text>]
+  cookiejar bundle add <id> <site> [--profile <id>] [--names a,b] [--pick]
+  cookiejar bundle remove <id> <site> [--profile <id>]
+  cookiejar bundle rm <id> [--force]
+
+Giving a bundle to an agent
+  cookiejar token new <bundle> [--label <who>] [--days 30] [--proxy-only] [--no-fetch]
+  cookiejar token revoke <bundle> <token-id>
+  cookiejar share <bundle> [--tunnel <url>]        MCP + curl config, local and cloud
+  cookiejar activity [--limit 50]                  Audit log
+
+Being an agent
+  cookiejar export [--bundle <id> | --token <token>] [--format netscape|storage-state|json] [--out <file>]
+  cookiejar header --url-target <url> [--bundle <id> | --token <token>]
   cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}]
-      Speak MCP over stdio so an agent can use one bundle. Token via
-      --token or COOKIEJAR_TOKEN.
 
-  cookiejar export [--format netscape|storage-state|json] [--out <file>]
-      Write a bundle's cookies to a jar file.
-
-  cookiejar header --url-target <url>
-      Print the Cookie header for a URL covered by the bundle.
-
-  cookiejar doctor
-      Show which browser profiles cookiejar can read on this machine.
+The app (optional)
+  cookiejar ui [--port ${DEFAULT_PORT}] [--open] [--auto-lock <minutes>]
 `;
 
 async function main(): Promise<void> {
@@ -113,9 +162,112 @@ async function main(): Promise<void> {
       runMcpServer({ daemonUrl: flagString(args, 'url', DEFAULT_URL)!, token: requireToken(args) });
       return;
     }
+    case 'setup': {
+      await cmd.setup(await openForWrite());
+      return;
+    }
+    case 'status': {
+      cmd.status(await openVault(), DEFAULT_URL);
+      return;
+    }
+    case 'doctor': {
+      cmd.doctor();
+      return;
+    }
+    case 'profiles': {
+      cmd.profiles();
+      return;
+    }
+    case 'passwd': {
+      const current = process.env.COOKIEJAR_PASSWORD ?? (await askSecret('Current master password: '));
+      await cmd.changePassword(await openForWrite(), current);
+      return;
+    }
+    case 'sites': {
+      cmd.listSites({ profileId: flagString(args, 'profile'), filter: flagString(args, 'filter') });
+      return;
+    }
+    case 'cookies': {
+      cmd.listCookies(positional(args, 0, 'a site'), flagString(args, 'profile'));
+      return;
+    }
+    case 'bundles': {
+      cmd.listBundles(await openVault());
+      return;
+    }
+    case 'bundle': {
+      const sub = positional(args, 0, 'a bundle id or subcommand');
+      if (sub === 'new') {
+        await cmd.newBundle(await openForWrite(), positional(args, 1, 'a name'), flagString(args, 'description'));
+        return;
+      }
+      if (sub === 'add') {
+        await cmd.bundleAdd(await openForWrite(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a site'), {
+          profileId: flagString(args, 'profile'),
+          names: flagString(args, 'names')?.split(',').map((name) => name.trim()).filter(Boolean),
+          pick: flagBool(args, 'pick'),
+        });
+        return;
+      }
+      if (sub === 'remove') {
+        cmd.bundleRemove(
+          await openForWrite(),
+          positional(args, 1, 'a bundle id'),
+          positional(args, 2, 'a site'),
+          flagString(args, 'profile'),
+        );
+        return;
+      }
+      if (sub === 'rm') {
+        await cmd.bundleDelete(await openForWrite(), positional(args, 1, 'a bundle id'), flagBool(args, 'force'));
+        return;
+      }
+      cmd.showBundle(await openVault(), sub);
+      return;
+    }
+    case 'token': {
+      const sub = positional(args, 0, 'new or revoke');
+      if (sub === 'new') {
+        cmd.newGrant(await openForWrite(), positional(args, 1, 'a bundle id'), {
+          label: flagString(args, 'label'),
+          days: flagNumber(args, 'days', 30),
+          allowFetch: !flagBool(args, 'no-fetch'),
+          redactValues: flagBool(args, 'proxy-only'),
+        });
+        return;
+      }
+      if (sub === 'revoke') {
+        cmd.revoke(await openForWrite(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a token id'));
+        return;
+      }
+      throw new CliError('use: cookiejar token new <bundle> | cookiejar token revoke <bundle> <token-id>');
+    }
+    case 'share': {
+      cmd.share(await openVault(), positional(args, 0, 'a bundle id'), {
+        tunnel: flagString(args, 'tunnel'),
+        port: DEFAULT_PORT,
+      });
+      return;
+    }
+    case 'activity': {
+      cmd.activity(flagNumber(args, 'limit', 50));
+      return;
+    }
     case 'export': {
       const format = flagString(args, 'format', 'netscape')!;
-      const body = await agentGet(args, `/agent/cookies?format=${encodeURIComponent(format)}`);
+      const bundleId = flagString(args, 'bundle');
+      let body: string;
+      if (bundleId) {
+        const cookies = await localBundleCookies(bundleId);
+        body =
+          format === 'storage-state'
+            ? toStorageState(cookies)
+            : format === 'json'
+              ? JSON.stringify(cookies, null, 2)
+              : toNetscape(cookies);
+      } else {
+        body = await agentGet(args, `/agent/cookies?format=${encodeURIComponent(format)}`);
+      }
       const out = flagString(args, 'out');
       if (out) {
         fs.writeFileSync(out, body, { mode: 0o600 });
@@ -127,32 +279,14 @@ async function main(): Promise<void> {
     }
     case 'header': {
       const target = flagString(args, 'url-target');
-      if (!target) {
-        console.error('--url-target <url> is required');
-        process.exit(2);
+      if (!target) throw new CliError('--url-target <url> is required');
+      const bundleId = flagString(args, 'bundle');
+      if (bundleId) {
+        console.log(cookieHeaderFor(await localBundleCookies(bundleId), target));
+        return;
       }
       const body = await agentGet(args, `/agent/cookies?format=header&url=${encodeURIComponent(target)}`);
       console.log((JSON.parse(body) as { cookie: string }).cookie);
-      return;
-    }
-    case 'doctor': {
-      const reads = readAllProfiles();
-      const readable = reads.filter((read) => !read.error && read.cookies.length > 0);
-      const safariBlocked = reads.some((read) => read.profile.browser === 'safari' && read.error);
-
-      if (readable.length === 0) {
-        if (reads.length > 0) console.log('No profiles with readable cookies found.');
-        else console.log('No browser profiles found.');
-      }
-      for (const read of readable) {
-        const sites = new Set(read.cookies.map((c) => bareDomain(c.domain))).size;
-        console.log(`✓ ${read.profile.label} (${read.profile.id}) — ${read.cookies.length} cookies across ${sites} sites`);
-      }
-      if (safariBlocked) {
-        console.log(
-          '\nSafari cookies are protected by macOS Full Disk Access. Grant it to the terminal or app running cookiejar (System Settings → Privacy & Security → Full Disk Access), then run doctor again.',
-        );
-      }
       return;
     }
     default:
