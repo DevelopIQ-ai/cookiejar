@@ -64,3 +64,16 @@ export const expiryText = (expires: number): string => {
 
 export const browserGlyph = (browser: string): string =>
   browser === 'safari' ? '🧭' : browser === 'firefox' ? '🦊' : browser === 'brave' ? '🦁' : browser === 'edge' ? '🌊' : '🌐';
+
+const BROWSER_NAMES: Record<string, string> = {
+  chrome: 'Chrome',
+  'chrome-beta': 'Chrome Beta',
+  chromium: 'Chromium',
+  brave: 'Brave',
+  edge: 'Edge',
+  arc: 'Arc',
+  firefox: 'Firefox',
+  safari: 'Safari',
+};
+
+export const browserName = (browser: string): string => BROWSER_NAMES[browser] ?? browser;

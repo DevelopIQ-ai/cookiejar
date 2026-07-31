@@ -2,19 +2,95 @@ import { useEffect, useState } from 'react';
 import { api, type Bundle, type CookieMeta, type Selector } from '../api';
 import { Banner, Copyable, Empty, Label, browserGlyph, expiryText, relative } from '../components';
 
-function mcpSnippet(bundleName: string, token: string): string {
+function mcpSnippet(bundleName: string, token: string, remoteUrl?: string): string {
   return JSON.stringify(
     {
       mcpServers: {
         [`cookiejar-${bundleName}`]: {
           command: 'npx',
-          args: ['-y', 'cookiejar', 'mcp'],
+          args: ['-y', '@puffle/cookiejar', 'mcp', ...(remoteUrl ? ['--url', remoteUrl] : [])],
           env: { COOKIEJAR_TOKEN: token },
         },
       },
     },
     null,
     2,
+  );
+}
+
+const TUNNEL_COMMAND = 'cloudflared tunnel --url http://127.0.0.1:4088';
+
+function fetchExample(url: string): string {
+  return `curl -X POST ${url}/agent/fetch \\
+  -H "authorization: Bearer $COOKIEJAR_TOKEN" \\
+  -H "content-type: application/json" \\
+  -d '{"url":"https://example.com/api/me"}'`;
+}
+
+/** How to hand this bundle to an agent, locally or in the cloud. */
+function HandoffPanel({ bundle }: { bundle: Bundle }) {
+  const [where, setWhere] = useState<'local' | 'cloud'>('local');
+  const [tunnel, setTunnel] = useState('');
+  const remote = tunnel.trim().replace(/\/+$/, '');
+  const target = remote || 'https://your-tunnel.example';
+
+  return (
+    <div className="stack">
+      <Label colour="blue">Give it to an agent</Label>
+      <div className="inline">
+        <button className="chip" aria-pressed={where === 'local'} onClick={() => setWhere('local')}>
+          On this Mac
+        </button>
+        <button className="chip" aria-pressed={where === 'cloud'} onClick={() => setWhere('cloud')}>
+          Agent in the cloud
+        </button>
+      </div>
+
+      {where === 'local' ? (
+        <>
+          <p className="tiny muted" style={{ margin: 0 }}>
+            Paste this into Claude Code, Cursor, or any MCP client running on this machine, with the token you issued below.
+          </p>
+          <pre className="snippet">{mcpSnippet(bundle.id, 'cjr_…')}</pre>
+          <Copyable value={mcpSnippet(bundle.id, 'cjr_…')} label="Copy MCP config" />
+        </>
+      ) : (
+        <>
+          <p className="tiny muted" style={{ margin: 0 }}>
+            Cookies never have to leave this Mac. Expose the local daemon over a tunnel, then give the cloud agent a{' '}
+            <strong>proxy-only</strong> token: it can make authenticated requests, but never sees a cookie value. Revoking the
+            token or locking the jar cuts it off instantly.
+          </p>
+          <div className="stack" style={{ gap: 8 }}>
+            <span className="tiny faint">1 · Run a tunnel on this Mac (Tailscale Funnel or ngrok work the same way).</span>
+            <pre className="snippet">{TUNNEL_COMMAND}</pre>
+            <Copyable value={TUNNEL_COMMAND} label="Copy tunnel command" />
+          </div>
+          <div className="field">
+            <span className="tiny faint">2 · Paste the URL the tunnel printed.</span>
+            <input
+              type="text"
+              value={tunnel}
+              placeholder="https://calm-cookie-1234.trycloudflare.com"
+              onChange={(event) => setTunnel(event.target.value)}
+            />
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            <span className="tiny faint">3 · Give the agent the token plus one of these.</span>
+            <pre className="snippet">{mcpSnippet(bundle.id, 'cjr_…', target)}</pre>
+            <div className="inline">
+              <Copyable value={mcpSnippet(bundle.id, 'cjr_…', target)} label="Copy MCP config" />
+              <Copyable value={fetchExample(target)} label="Copy curl example" />
+            </div>
+            <pre className="snippet">{fetchExample(target)}</pre>
+          </div>
+          <p className="tiny faint" style={{ margin: 0 }}>
+            The tunnel URL is a bearer-token endpoint: anyone holding the token can use the bundle, so keep expiry short and
+            revoke when the job is done.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -223,6 +299,10 @@ function Detail({ bundle, onChanged }: { bundle: Bundle; onChanged: () => void }
 
       <div className="card plain">
         <GrantPanel bundle={bundle} onChanged={onChanged} />
+      </div>
+
+      <div className="card plain">
+        <HandoffPanel bundle={bundle} />
       </div>
     </div>
   );

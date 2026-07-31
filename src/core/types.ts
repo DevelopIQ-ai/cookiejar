@@ -71,9 +71,17 @@ export interface Bundle {
   grants: BundleGrant[];
 }
 
+/** First-run answers, used to tailor the UI to the browsers actually in use. */
+export interface Preferences {
+  /** Browsers the user said they use, e.g. ['chrome', 'safari']. */
+  browsers: BrowserId[];
+  onboardedAt: string | null;
+}
+
 export interface VaultData {
   version: 1;
   bundles: Bundle[];
+  preferences?: Preferences;
 }
 
 export interface AuditEntry {

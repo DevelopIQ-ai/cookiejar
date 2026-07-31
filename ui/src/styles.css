@@ -421,6 +421,52 @@ pre.snippet {
   font-size: 11px;
 }
 
+/* ---------- onboarding ---------- */
+
+.choices {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 13px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.choice:hover {
+  border-color: var(--ink-soft);
+}
+.choice[aria-pressed='true'] {
+  border-style: solid;
+  border-color: var(--ink);
+  background: var(--card-solid);
+}
+.choice .glyph {
+  font-size: 17px;
+}
+
+ol.steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+details > summary {
+  cursor: pointer;
+}
+
 /* ---------- misc ---------- */
 
 .split {

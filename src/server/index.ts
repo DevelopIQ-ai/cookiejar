@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Vault, newBundleId, BadPasswordError, VaultLockedError } from '../core/vault.js';
 import { audit, readAudit } from '../core/audit.js';
 import { hashToken, newToken } from '../core/crypto.js';
-import { readAllProfiles, toMeta } from '../core/browsers/index.js';
+import { installedBrowsers, profileHealth, readAllProfiles, safariAccess, toMeta } from '../core/browsers/index.js';
 import {
   bareDomain,
   cookieHeaderFor,
@@ -17,7 +17,7 @@ import {
   toStorageState,
 } from '../core/bundles.js';
 import { AccessDeniedError, authorize, noteUse } from '../core/access.js';
-import type { Bundle, CookieSelector } from '../core/types.js';
+import type { Bundle, BrowserId, CookieSelector, Preferences } from '../core/types.js';
 import { bearerToken, originAllowed, parseCookies, readJsonBody, sendJson } from './util.js';
 
 const SESSION_COOKIE = 'cjr_session';
@@ -150,15 +150,49 @@ export function createServer(options: ServerOptions) {
     }
 
     if (route === '/api/profiles') {
-      const reads = readAllProfiles();
+      const health = profileHealth();
       sendJson(res, 200, {
-        profiles: reads.map((read) => ({
+        // Only profiles with cookies are worth picking from; the rest are
+        // reported separately so the UI can offer a fix instead of an error.
+        profiles: health.usable.map((read) => ({
           ...read.profile,
           cookieCount: read.cookies.length,
           siteCount: new Set(read.cookies.map((c) => bareDomain(c.domain))).size,
-          error: read.error ?? null,
         })),
+        blocked: health.blocked.map(({ profile, error }) => ({
+          id: profile.id,
+          browser: profile.browser,
+          label: profile.label,
+          error,
+          fix: profile.browser === 'safari' ? 'full-disk-access' : null,
+        })),
+        emptyCount: health.empty.length,
+        safari: safariAccess().state,
       });
+      return true;
+    }
+
+    if (route === '/api/onboarding' && method === 'GET') {
+      const preferences = vault.read().preferences ?? { browsers: [], onboardedAt: null };
+      sendJson(res, 200, {
+        preferences,
+        installed: installedBrowsers(),
+        safari: safariAccess().state,
+        platform: process.platform,
+      });
+      return true;
+    }
+
+    if (route === '/api/onboarding' && method === 'POST') {
+      const body = await readJsonBody<{ browsers?: string[]; done?: boolean }>(req);
+      const preferences: Preferences = {
+        browsers: (body.browsers ?? []) as BrowserId[],
+        onboardedAt: body.done ? new Date().toISOString() : null,
+      };
+      vault.write((data) => {
+        data.preferences = preferences;
+      });
+      sendJson(res, 200, { preferences });
       return true;
     }
 

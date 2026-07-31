@@ -24,7 +24,25 @@ function fakeChromeProfile(): void {
   db.close();
 }
 
+/** Profiles Chrome leaves behind: one with no cookies table, one with no rows. */
+function uselessChromeProfiles(): void {
+  const noTable = path.join(sandbox, '.config', 'google-chrome', 'Profile 14');
+  fs.mkdirSync(noTable, { recursive: true });
+  const stray = new DatabaseSync(path.join(noTable, 'Cookies'));
+  stray.exec('CREATE TABLE meta (key TEXT, value TEXT)');
+  stray.close();
+
+  const empty = path.join(sandbox, '.config', 'google-chrome', 'Profile 2');
+  fs.mkdirSync(empty, { recursive: true });
+  const db = new DatabaseSync(path.join(empty, 'Cookies'));
+  db.exec(`CREATE TABLE cookies (
+    host_key TEXT, name TEXT, value TEXT, encrypted_value BLOB, path TEXT,
+    expires_utc INTEGER, is_secure INTEGER, is_httponly INTEGER, samesite INTEGER)`);
+  db.close();
+}
+
 fakeChromeProfile();
+uselessChromeProfiles();
 
 const { startServer } = await import('../src/server/index.js');
 const { url, close } = await startServer({ port: 0, autoLockMinutes: 0 });
@@ -58,9 +76,20 @@ test('creating the vault unlocks the session and finds browser cookies', async (
   const created = await ui('/api/vault/create', { method: 'POST', body: JSON.stringify({ password: 'a-good-password' }) });
   assert.equal(created.status, 200);
 
-  const profiles = (await (await ui('/api/profiles')).json()) as { profiles: Array<{ id: string; cookieCount: number }> };
+  const profiles = (await (await ui('/api/profiles')).json()) as {
+    profiles: Array<{ id: string; cookieCount: number }>;
+    blocked: Array<{ id: string }>;
+    emptyCount: number;
+  };
   const chrome = profiles.profiles.find((p) => p.id === 'chrome:Default');
   assert.equal(chrome?.cookieCount, 3);
+  assert.deepEqual(
+    profiles.profiles.map((p) => p.id),
+    ['chrome:Default'],
+    'profiles with nothing to offer stay out of the picker',
+  );
+  assert.deepEqual(profiles.blocked, [], 'a missing cookies table is empty, not an error');
+  assert.equal(profiles.emptyCount, 2);
 
   const sites = (await (await ui('/api/sites')).json()) as { sites: Array<{ site: string; cookieCount: number }> };
   assert.equal(sites.sites.find((s) => s.site === 'example.com')?.cookieCount, 2);
@@ -157,6 +186,25 @@ test('locking the jar cuts off agent tokens', async () => {
     200,
   );
   assert.equal((await agent('/agent/bundle', token)).status, 200);
+});
+
+test('onboarding answers survive a lock', async () => {
+  const before = (await (await ui('/api/onboarding')).json()) as {
+    preferences: { browsers: string[]; onboardedAt: string | null };
+    installed: string[];
+  };
+  assert.equal(before.preferences.onboardedAt, null);
+  assert.ok(before.installed.includes('chrome'));
+
+  await ui('/api/onboarding', { method: 'POST', body: JSON.stringify({ browsers: ['chrome'], done: true }) });
+  await ui('/api/vault/lock', { method: 'POST' });
+  await ui('/api/vault/unlock', { method: 'POST', body: JSON.stringify({ password: 'a-good-password' }) });
+
+  const after = (await (await ui('/api/onboarding')).json()) as {
+    preferences: { browsers: string[]; onboardedAt: string | null };
+  };
+  assert.deepEqual(after.preferences.browsers, ['chrome']);
+  assert.ok(after.preferences.onboardedAt);
 });
 
 test('cross-origin writes are refused', async () => {

@@ -5,6 +5,7 @@ import { Cookies } from './views/Cookies';
 import { Bundles } from './views/Bundles';
 import { Activity } from './views/Activity';
 import { Settings } from './views/Settings';
+import { Onboarding } from './views/Onboarding';
 import { Label } from './components';
 
 type Tab = 'cookies' | 'bundles' | 'activity' | 'settings';
@@ -20,6 +21,7 @@ export function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [tab, setTab] = useState<Tab>('cookies');
   const [bundles, setBundles] = useState<Bundle[]>([]);
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
   const refreshState = useCallback(async () => {
     setState(await api.state());
@@ -40,6 +42,14 @@ export function App() {
     if (state?.unlocked) refreshBundles();
   }, [state?.unlocked, refreshBundles]);
 
+  useEffect(() => {
+    if (!state?.unlocked) return;
+    void api
+      .onboarding()
+      .then((res) => setOnboarded(res.preferences.onboardedAt !== null))
+      .catch(() => setOnboarded(true));
+  }, [state?.unlocked]);
+
   if (!state) return <div className="lock" />;
 
   if (!state.unlocked) {
@@ -52,6 +62,9 @@ export function App() {
       />
     );
   }
+
+  if (onboarded === null) return <div className="lock" />;
+  if (!onboarded) return <Onboarding onDone={() => setOnboarded(true)} />;
 
   return (
     <div className="shell">
@@ -90,7 +103,7 @@ export function App() {
         {tab === 'cookies' ? <Cookies bundles={bundles} onBundlesChanged={refreshBundles} /> : null}
         {tab === 'bundles' ? <Bundles bundles={bundles} onChanged={refreshBundles} /> : null}
         {tab === 'activity' ? <Activity /> : null}
-        {tab === 'settings' ? <Settings state={state} /> : null}
+        {tab === 'settings' ? <Settings state={state} onRerunOnboarding={() => setOnboarded(false)} /> : null}
       </main>
     </div>
   );

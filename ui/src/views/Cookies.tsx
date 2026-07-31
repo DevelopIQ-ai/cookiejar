@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Bundle, type CookieMeta, type Profile, type Selector, type Site } from '../api';
+import { api, type BlockedProfile, type Bundle, type CookieMeta, type Profile, type Selector, type Site } from '../api';
 import { Banner, Empty, Label, browserGlyph, expiryText } from '../components';
+import { FullDiskAccessSteps } from './Onboarding';
 
 const keyOf = (cookie: CookieMeta): string => `${cookie.profileId}|${cookie.domain}|${cookie.path}|${cookie.name}`;
 const bare = (domain: string): string => domain.replace(/^\./, '').toLowerCase();
@@ -19,10 +20,10 @@ export function selectorsFromCookies(cookies: CookieMeta[]): Selector[] {
 
 export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBundlesChanged: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [blocked, setBlocked] = useState<BlockedProfile[]>([]);
   const [active, setActive] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [sites, setSites] = useState<Site[]>([]);
-  const [readErrors, setReadErrors] = useState<Array<{ profileId: string; error: string }>>([]);
   const [openSite, setOpenSite] = useState<string | null>(null);
   const [siteCookies, setSiteCookies] = useState<CookieMeta[]>([]);
   const [picked, setPicked] = useState<Map<string, CookieMeta>>(new Map());
@@ -34,7 +35,10 @@ export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBu
   useEffect(() => {
     void api
       .profiles()
-      .then((res) => setProfiles(res.profiles))
+      .then((res) => {
+        setProfiles(res.profiles);
+        setBlocked(res.blocked);
+      })
       .catch((err: Error) => setError(err.message));
   }, []);
 
@@ -42,10 +46,7 @@ export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBu
     const handle = setTimeout(() => {
       void api
         .sites(active, query)
-        .then((res) => {
-          setSites(res.sites);
-          setReadErrors(res.errors);
-        })
+        .then((res) => setSites(res.sites))
         .catch((err: Error) => setError(err.message));
     }, 150);
     return () => clearTimeout(handle);
@@ -142,9 +143,19 @@ export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBu
 
       {error ? <Banner>{error}</Banner> : null}
       {note ? <Banner kind="good">{note}</Banner> : null}
-      {readErrors.map((item) => (
-        <Banner kind="warn" key={item.profileId}>
-          {item.profileId}: {item.error}
+      {blocked.map((item) => (
+        <Banner kind="warn" key={item.id}>
+          {item.fix === 'full-disk-access' ? (
+            <details>
+              <summary>{item.label} is installed but macOS is blocking its cookies. Here is the one-time fix.</summary>
+              <FullDiskAccessSteps />
+            </details>
+          ) : (
+            <>
+              {item.label} could not be read right now.
+              <span className="tiny faint"> {item.error}</span>
+            </>
+          )}
         </Banner>
       ))}
 
@@ -157,14 +168,14 @@ export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBu
             key={profile.id}
             className="chip"
             aria-pressed={active.includes(profile.id)}
-            title={profile.error ?? profile.path}
+            title={profile.path}
             onClick={() =>
               setActive((current) =>
                 current.includes(profile.id) ? current.filter((id) => id !== profile.id) : [...current, profile.id],
               )
             }
           >
-            {browserGlyph(profile.browser)} {profile.label} · {profile.error ? 'unreadable' : profile.cookieCount}
+            {browserGlyph(profile.browser)} {profile.label} · {profile.cookieCount}
           </button>
         ))}
       </div>
@@ -175,7 +186,11 @@ export function Cookies({ bundles, onBundlesChanged }: { bundles: Bundle[]; onBu
             <Label>Sites · {sites.length}</Label>
           </div>
           {sites.length === 0 ? (
-            <div className="row muted tiny">No cookies found. Try `cookiejar doctor` in a terminal.</div>
+            <div className="row muted tiny">
+              {profiles.length === 0
+                ? 'No readable browser cookies yet. Sign in somewhere in your browser, then reload.'
+                : 'No sites match that filter.'}
+            </div>
           ) : null}
           <div className="rows">
             {sites.slice(0, 400).map((site) => (

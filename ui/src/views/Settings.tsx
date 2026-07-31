@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
-import { api, type AppState, type Profile } from '../api';
+import { api, type AppState, type BlockedProfile, type Profile } from '../api';
 import { Banner, Copyable, Label, browserGlyph } from '../components';
+import { FullDiskAccessSteps } from './Onboarding';
 
-export function Settings({ state }: { state: AppState }) {
+export function Settings({ state, onRerunOnboarding }: { state: AppState; onRerunOnboarding: () => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [blocked, setBlocked] = useState<BlockedProfile[]>([]);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api.profiles().then((res) => setProfiles(res.profiles));
+    void api.profiles().then((res) => {
+      setProfiles(res.profiles);
+      setBlocked(res.blocked);
+    });
   }, []);
 
   const change = async () => {
@@ -57,13 +62,41 @@ export function Settings({ state }: { state: AppState }) {
                 <div className="truncate">
                   {browserGlyph(profile.browser)} {profile.label}
                 </div>
-                <div className="tiny faint truncate">{profile.error ?? `${profile.cookieCount} cookies · ${profile.path}`}</div>
+                <div className="tiny faint truncate">{`${profile.cookieCount} cookies · ${profile.path}`}</div>
               </div>
-              <div className="tiny faint">{profile.error ? 'unreadable' : `${profile.siteCount} sites`}</div>
+              <div className="tiny faint">{`${profile.siteCount} sites`}</div>
             </div>
           ))}
         </div>
+        {profiles.length === 0 ? (
+          <p className="tiny muted" style={{ margin: 0 }}>
+            Nothing readable yet. Profiles with no cookies are hidden.
+          </p>
+        ) : null}
+        <div className="inline">
+          <button className="btn ghost sm" onClick={onRerunOnboarding}>
+            Redo browser setup
+          </button>
+        </div>
       </div>
+
+      {blocked.length ? (
+        <div className="card plain stack">
+          <Label colour="red">Needs permission</Label>
+          {blocked.map((item) => (
+            <div className="stack" key={item.id}>
+              <div className="tiny">
+                {browserGlyph(item.browser)} {item.label}
+              </div>
+              {item.fix === 'full-disk-access' ? (
+                <FullDiskAccessSteps />
+              ) : (
+                <div className="tiny faint">{item.error}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="card plain stack">
         <Label colour="red">Master password</Label>

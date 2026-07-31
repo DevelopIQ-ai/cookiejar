@@ -12,7 +12,29 @@ export interface Profile {
   path: string;
   cookieCount: number;
   siteCount: number;
-  error: string | null;
+}
+
+export interface BlockedProfile {
+  id: string;
+  browser: string;
+  label: string;
+  error: string;
+  /** A fix the UI knows how to walk the user through. */
+  fix: 'full-disk-access' | null;
+}
+
+export interface ProfilesResponse {
+  profiles: Profile[];
+  blocked: BlockedProfile[];
+  emptyCount: number;
+  safari: 'ok' | 'blocked' | 'absent';
+}
+
+export interface Onboarding {
+  preferences: { browsers: string[]; onboardedAt: string | null };
+  installed: string[];
+  safari: 'ok' | 'blocked' | 'absent';
+  platform: string;
 }
 
 export interface Site {
@@ -104,7 +126,10 @@ export const api = {
   unlock: (password: string) => post<{ ok: true }>('/api/vault/unlock', { password }),
   lock: () => post<{ ok: true }>('/api/vault/lock'),
   changePassword: (current: string, next: string) => post<{ ok: true }>('/api/vault/password', { current, next }),
-  profiles: () => request<{ profiles: Profile[] }>('/api/profiles'),
+  profiles: () => request<ProfilesResponse>('/api/profiles'),
+  onboarding: () => request<Onboarding>('/api/onboarding'),
+  saveOnboarding: (browsers: string[], done: boolean) =>
+    post<{ preferences: Onboarding['preferences'] }>('/api/onboarding', { browsers, done }),
   sites: (profileIds: string[], q: string) => {
     const params = new URLSearchParams();
     for (const id of profileIds) params.append('profileId', id);
