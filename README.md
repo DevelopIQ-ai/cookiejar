@@ -102,15 +102,21 @@ cookiejar cookies linear.app                     # names only — values are nev
 cookiejar bundle new "linear agent"
 cookiejar bundle add linear-agent-9f0b73 linear.app --pick   # tick cookies, terminal style
 cookiejar bundle linear-agent-9f0b73             # selectors, live contents, tokens
+cookiejar bundle edit linear-agent-9f0b73 --name "linear (devin)"
 
 cookiejar token new linear-agent-9f0b73 --label devin --days 7 --proxy-only
 cookiejar share linear-agent-9f0b73              # MCP + curl config, local and cloud
+cookiejar tokens                                 # every token this jar handed out
 cookiejar token revoke linear-agent-9f0b73 1b027f6ab46c
-cookiejar activity                               # audit log
+cookiejar token revoke --all                     # panic switch: cut every agent off
+cookiejar activity --bundle linear-agent-9f0b73  # audit log
 ```
 
 `cookiejar export --bundle <id>` and `cookiejar header --bundle <id>` read the jar directly, so a
-local script needs neither a daemon nor a token. Run `cookiejar help` for the full list.
+local script needs neither a daemon nor a token. Nothing needs a file edited by hand: `setup
+--browsers chrome,firefox` skips the prompts for scripts, and `cookiejar reset` throws the jar away
+if you forget the master password (bundles go, your cookies don't — they were never in it). Run
+`cookiejar help` for the full list.
 
 ## Using a bundle from an agent
 

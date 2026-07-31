@@ -89,11 +89,12 @@ A CLI. Commands that touch the jar ask for your master password (or read
 COOKIEJAR_PASSWORD, for scripts).
 
 Setting up
-  cookiejar setup                        Pick your browsers; explains Safari's permission
+  cookiejar setup [--browsers chrome,firefox]  Pick your browsers; explains Safari's permission
   cookiejar status                       Where the jar is, what is readable, what exists
   cookiejar doctor                       Which browser profiles can be read, and why not
   cookiejar profiles                     Every discovered profile, including empty ones
   cookiejar passwd                       Change the master password
+  cookiejar reset [--force]              Delete the jar — for a forgotten password
   cookiejar version                      Print the version
 
 Picking cookies
@@ -105,15 +106,18 @@ Bundles
   cookiejar bundles                                List bundles
   cookiejar bundle <id>                            Selectors, live cookies, tokens
   cookiejar bundle new <name> [--description <text>]
+  cookiejar bundle edit <id> [--name <name>] [--description <text>]
   cookiejar bundle add <id> <site> [--profile <id>] [--names a,b] [--pick] [--all]
   cookiejar bundle remove <id> <site> [--profile <id>]
   cookiejar bundle rm <id> [--force]
 
 Giving a bundle to an agent
   cookiejar token new <bundle> [--label <who>] [--days 30] [--proxy-only] [--no-fetch]
+  cookiejar tokens [--live]                        Every token this jar handed out
   cookiejar token revoke <bundle> <token-id>
+  cookiejar token revoke --all [<bundle>]          Cut every live token off at once
   cookiejar share <bundle> [--tunnel <url>]        MCP + curl config, local and cloud
-  cookiejar activity [--limit 50]                  Audit log
+  cookiejar activity [--limit 50] [--bundle <id>]  Audit log
 
 Serving agents
   cookiejar serve [--port ${DEFAULT_PORT}] [--auto-lock <minutes>]
@@ -149,7 +153,11 @@ async function main(): Promise<void> {
       return;
     }
     case 'setup': {
-      await cmd.setup(await openVault());
+      await cmd.setup(await openVault(), flagString(args, 'browsers'));
+      return;
+    }
+    case 'reset': {
+      await cmd.reset(flagBool(args, 'force'));
       return;
     }
     case 'status': {
@@ -212,6 +220,13 @@ async function main(): Promise<void> {
         );
         return;
       }
+      if (sub === 'edit') {
+        cmd.editBundle(await openVault(), positional(args, 1, 'a bundle id'), {
+          name: flagString(args, 'name'),
+          description: flagString(args, 'description'),
+        });
+        return;
+      }
       if (sub === 'rm') {
         await cmd.bundleDelete(await openVault(), positional(args, 1, 'a bundle id'), flagBool(args, 'force'));
         return;
@@ -231,10 +246,19 @@ async function main(): Promise<void> {
         return;
       }
       if (sub === 'revoke') {
+        const all = args.flags.get('all'); // --all <bundle> parses the id as the flag's value
+        if (all !== undefined) {
+          cmd.revokeAll(await openVault(), typeof all === 'string' ? all : args.rest[1]);
+          return;
+        }
         cmd.revoke(await openVault(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a token id'));
         return;
       }
-      throw new CliError('use: cookiejar token new <bundle> | cookiejar token revoke <bundle> <token-id>');
+      throw new CliError('use: cookiejar token new <bundle> | cookiejar token revoke <bundle> <token-id> | cookiejar token revoke --all');
+    }
+    case 'tokens': {
+      cmd.listGrants(await openVault(), { live: flagBool(args, 'live') });
+      return;
     }
     case 'share': {
       cmd.share(await openVault(), positional(args, 0, 'a bundle id'), {
@@ -244,7 +268,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'activity': {
-      cmd.activity(flagNumber(args, 'limit', 50));
+      cmd.activity(flagNumber(args, 'limit', 50), flagString(args, 'bundle'));
       return;
     }
     case 'export': {

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 import { readAudit } from '../core/audit.js';
 import { installedBrowsers, profileHealth, readAllProfiles, safariAccess, toMeta } from '../core/browsers/index.js';
 import { bareDomain, domainCovers, isExpired, resolveBundle } from '../core/bundles.js';
@@ -10,8 +12,9 @@ import {
   removeSelector,
   revokeGrant,
   setPreferences,
+  updateBundle,
 } from '../core/manage.js';
-import { vaultPath } from '../core/paths.js';
+import { auditPath, vaultPath } from '../core/paths.js';
 import type { Bundle, BrowserId, CookieMeta } from '../core/types.js';
 import type { Vault } from '../core/vault.js';
 import { ask, confirm } from './prompt.js';
@@ -37,10 +40,28 @@ export const FULL_DISK_ACCESS = `Safari keeps its cookies in a container macOS p
 const pad = (value: string, width: number): string => value.padEnd(width);
 const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
+/** Turns `--browsers chrome,safari` into ids, so setup can be scripted. */
+function namedBrowsers(list: string, installed: BrowserId[]): BrowserId[] {
+  return list.split(',').map((part) => {
+    const name = part.trim().toLowerCase();
+    const browser = installed.find((id) => id === name);
+    if (!browser) throw new CliError(`no ${name} profile here — installed: ${installed.join(', ')}`);
+    return browser;
+  });
+}
+
 /** First run in the terminal: which browsers, and Safari's permission if asked for. */
-export async function setup(vault: Vault): Promise<void> {
+export async function setup(vault: Vault, browsers?: string): Promise<void> {
   const installed = installedBrowsers();
   if (installed.length === 0) throw new CliError('no browser profiles found on this machine');
+
+  if (browsers) {
+    const named = namedBrowsers(browsers, installed);
+    setPreferences(vault, named, true);
+    console.log(`Saved: ${named.map((browser) => BROWSER_NAMES[browser]).join(', ')}.`);
+    if (named.includes('safari') && safariAccess().state === 'blocked') console.log(`\n${FULL_DISK_ACCESS}`);
+    return;
+  }
 
   console.log('Which browsers do you use? Only the ones you pick are read when picking cookies.\n');
   installed.forEach((browser, index) => {
@@ -282,6 +303,67 @@ export function revoke(vault: Vault, bundleId: string, id: string): void {
   console.log(`revoked ${grantId(grant)} (${grant.label})`);
 }
 
+/** The panic switch: cut off every live token, in one bundle or in all of them. */
+export function revokeAll(vault: Vault, bundleId?: string): void {
+  const bundles = bundleId ? [vault.bundle(bundleId)] : vault.read().bundles;
+  const live = bundles.flatMap((bundle) => bundle.grants.filter((g) => !g.revokedAt).map((g) => ({ bundle, grant: g })));
+  if (live.length === 0) {
+    console.log('no live tokens');
+    return;
+  }
+  for (const { bundle, grant } of live) revokeGrant(vault, bundle.id, grantId(grant));
+  console.log(`revoked ${plural(live.length, 'token')}`);
+  console.log('A running daemon picks this up on the next request — no restart needed.');
+}
+
+/** Every token this jar has handed out, so nothing is only visible per bundle. */
+export function listGrants(vault: Vault, opts: { live?: boolean } = {}): void {
+  const now = Date.now() / 1000;
+  const rows = vault.read().bundles.flatMap((bundle) =>
+    bundle.grants.map((grant) => ({
+      bundle,
+      grant,
+      state: grant.revokedAt
+        ? 'revoked'
+        : grant.expiresAt && grant.expiresAt < now
+          ? 'expired'
+          : grant.redactValues
+            ? 'live, proxy only'
+            : 'live',
+    })),
+  );
+  const shown = opts.live ? rows.filter((row) => row.state.startsWith('live')) : rows;
+  if (shown.length === 0) {
+    console.log(opts.live ? 'no live tokens' : 'no tokens yet — cookiejar token new <bundle>');
+    return;
+  }
+  const bundleWidth = Math.max(...shown.map((row) => row.bundle.id.length));
+  const labelWidth = Math.max(...shown.map((row) => row.grant.label.length));
+  for (const { bundle, grant, state } of shown) {
+    const used = grant.lastUsedAt ? `used ${grant.useCount}×, last ${grant.lastUsedAt}` : 'never used';
+    console.log(`${pad(grantId(grant), 14)} ${pad(bundle.id, bundleWidth)}  ${pad(grant.label, labelWidth)}  ${pad(state, 18)} ${used}`);
+  }
+}
+
+export function editBundle(vault: Vault, bundleId: string, patch: { name?: string; description?: string }): void {
+  if (patch.name === undefined && patch.description === undefined) {
+    throw new CliError('nothing to change — pass --name or --description');
+  }
+  const bundle = updateBundle(vault, bundleId, patch);
+  console.log(`${bundle.id}  ${bundle.name}${bundle.description ? `  — ${bundle.description}` : ''}`);
+}
+
+/** Start over when the master password is gone: the jar holds no cookie values, so this loses only bundles. */
+export async function reset(force: boolean): Promise<void> {
+  if (!fs.existsSync(vaultPath())) throw new CliError(`no jar at ${vaultPath()}`);
+  console.log(`This deletes ${vaultPath()} and ${auditPath()}: every bundle and token goes with it.`);
+  console.log('Your browsers and their cookies are untouched.');
+  if (!force && !(await confirm('Delete the jar?'))) return;
+  fs.rmSync(vaultPath(), { force: true });
+  fs.rmSync(auditPath(), { force: true });
+  console.log('deleted — cookiejar setup starts a new one');
+}
+
 function mcpConfig(bundle: Bundle, remoteUrl?: string): string {
   return JSON.stringify(
     {
@@ -323,8 +405,8 @@ short and revoke it when the job is done.`,
   );
 }
 
-export function activity(limit: number): void {
-  const entries = readAudit(limit);
+export function activity(limit: number, bundleId?: string): void {
+  const entries = readAudit(limit).filter((entry) => !bundleId || entry.bundleId === bundleId);
   if (entries.length === 0) {
     console.log('Nothing yet.');
     return;
