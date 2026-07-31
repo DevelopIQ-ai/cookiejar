@@ -88,6 +88,27 @@ test('a redacted token can only proxy', async () => {
   assert.equal((await agent('/agent/bundle', token)).status, 200);
 });
 
+test('a revocation from the terminal cuts a token off at once, and survives', async () => {
+  const token = tokenFor({ label: 'leaked', allowFetch: true });
+  // The daemon caches the jar and writes it back as tokens are used.
+  assert.equal((await agent('/agent/bundle', token)).status, 200);
+
+  const terminal = new Vault();
+  terminal.unlock('a-good-password');
+  const grant = terminal.bundle(bundle.id).grants.find((g) => g.label === 'leaked')!;
+  revokeGrant(terminal, bundle.id, grantId(grant));
+
+  assert.equal((await agent('/agent/bundle', token)).status, 403, 'no daemon restart needed');
+  assert.equal((await agent('/agent/bundle', token)).status, 403);
+
+  const onDisk = new Vault();
+  onDisk.unlock('a-good-password');
+  assert.ok(
+    onDisk.bundle(bundle.id).grants.find((g) => g.label === 'leaked')!.revokedAt,
+    'the daemon does not write the revocation away',
+  );
+});
+
 test('locking the jar cuts off agent tokens', async () => {
   const token = tokenFor({ label: 'until-lock', allowFetch: true });
   assert.equal((await agent('/agent/bundle', token)).status, 200);

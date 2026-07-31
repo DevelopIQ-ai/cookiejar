@@ -28,9 +28,10 @@ export interface ProfileReadResult {
 }
 
 /** Reads every discovered profile, reporting per-profile failures instead of throwing. */
-export function readAllProfiles(profileIds?: string[]): ProfileReadResult[] {
+export function readAllProfiles(profileIds?: string[], browsers?: BrowserId[]): ProfileReadResult[] {
   return discoverProfiles()
     .filter((profile) => !profileIds || profileIds.includes(profile.id))
+    .filter((profile) => !browsers || browsers.includes(profile.browser))
     .map((profile) => {
       try {
         return { profile, cookies: readCookies(profile) };
@@ -50,9 +51,9 @@ export interface ProfileHealth {
 }
 
 /** Splits a read into the three states worth reporting. */
-export function profileHealth(profileIds?: string[]): ProfileHealth {
+export function profileHealth(profileIds?: string[], browsers?: BrowserId[]): ProfileHealth {
   const health: ProfileHealth = { usable: [], blocked: [], empty: [] };
-  for (const read of readAllProfiles(profileIds)) {
+  for (const read of readAllProfiles(profileIds, browsers)) {
     if (read.error) health.blocked.push({ profile: read.profile, error: read.error });
     else if (read.cookies.length === 0) health.empty.push(read.profile);
     else health.usable.push(read);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ensureConfigDir, vaultPath } from './paths.js';
-import { deriveKey, newSalt, open, seal, type SealedBox } from './crypto.js';
+import { deriveKey, newSalt, open, openWithKey, seal, type SealedBox } from './crypto.js';
 import type { Bundle, VaultData } from './types.js';
 
 interface VaultFile {
@@ -34,6 +34,8 @@ export class Vault {
   private key: Buffer | null = null;
   private salt: Buffer | null = null;
   private data: VaultData | null = null;
+  /** Identity of the file our decrypted copy came from, so we can tell when someone else wrote it. */
+  private stamp: string | null = null;
 
   get exists(): boolean {
     return fs.existsSync(vaultPath());
@@ -62,6 +64,7 @@ export class Vault {
     this.data = JSON.parse(opened.plaintext) as VaultData;
     this.key = opened.key;
     this.salt = opened.salt;
+    this.stamp = this.diskStamp();
   }
 
   lock(): void {
@@ -69,14 +72,20 @@ export class Vault {
     this.key = null;
     this.salt = null;
     this.data = null;
+    this.stamp = null;
   }
 
   read(): VaultData {
+    this.syncFromDisk();
     if (!this.data) throw new VaultLockedError();
     return this.data;
   }
 
-  /** Mutates the decrypted data and re-seals the file atomically. */
+  /**
+   * Mutates the decrypted data and re-seals the file atomically. `read()` picks
+   * up anyone else's edits first, so a long-lived holder — `cookiejar serve` —
+   * can never write a stale copy back over a revocation made in the terminal.
+   */
   write(mutate: (data: VaultData) => void): VaultData {
     const data = this.read();
     mutate(data);
@@ -99,6 +108,32 @@ export class Vault {
     this.persist();
   }
 
+  private diskStamp(): string | null {
+    try {
+      const stat = fs.statSync(vaultPath());
+      return `${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Re-reads the file when another process has replaced it since we last touched it. */
+  private syncFromDisk(): void {
+    if (!this.key) return;
+    const stamp = this.diskStamp();
+    if (stamp === null || stamp === this.stamp) return;
+    const file = JSON.parse(fs.readFileSync(vaultPath(), 'utf8')) as VaultFile;
+    try {
+      this.data = JSON.parse(openWithKey(file.box, this.key)) as VaultData;
+    } catch {
+      // The master password changed under us; holding the old copy open would be wrong.
+      this.lock();
+      return;
+    }
+    this.salt = Buffer.from(file.box.salt, 'base64');
+    this.stamp = stamp;
+  }
+
   private persist(): void {
     if (!this.key || !this.salt || !this.data) throw new VaultLockedError();
     ensureConfigDir();
@@ -111,6 +146,7 @@ export class Vault {
     const tmp = path.join(path.dirname(target), `.vault.${crypto.randomUUID()}.tmp`);
     fs.writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, target);
+    this.stamp = this.diskStamp();
   }
 }
 

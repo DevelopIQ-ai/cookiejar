@@ -7,7 +7,12 @@
 - `cookiejar serve` replaces `cookiejar ui`: a loopback daemon that answers bundle tokens on
   `/agent/*` and 404s everything else, so a token can no longer reach bundle management.
 - `cookiejar setup` asks which browsers you use and explains Safari's Full Disk Access when macOS is
-  blocking it. The answer is stored in the encrypted vault.
+  blocking it. The answer is stored in the encrypted vault, and `sites`, `cookies` and `bundle add`
+  read only those browsers unless you pass `--all`.
+- `cookiejar token revoke` now cuts a token off on the agent's next request, with no daemon restart,
+  and a running `cookiejar serve` can no longer write a stale copy of the vault back over an edit
+  made in the terminal. Tokens issued while the daemon runs work immediately too.
+- Prompts accept piped answers, so `setup` and `--pick` can be scripted.
 - `cookiejar export --bundle <id>` and `header --bundle <id>` read the vault directly — a local
   script needs neither a daemon nor a token.
 - `cookiejar share <id> [--tunnel <url>]` prints the MCP and `curl` config for handing a bundle to a

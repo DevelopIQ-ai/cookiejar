@@ -24,30 +24,57 @@ function fakeChromeProfile(): void {
   db.close();
 }
 
+function fakeFirefoxProfile(): void {
+  const dir = path.join(sandbox, '.mozilla', 'firefox', 'abcd.demo');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, 'cookies.sqlite'));
+  db.exec(`CREATE TABLE moz_cookies (
+    host TEXT, name TEXT, value TEXT, path TEXT, expiry INTEGER,
+    isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER)`);
+  db.prepare(`INSERT INTO moz_cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    '.example.com',
+    'ff-only',
+    'ff-value',
+    '/',
+    0,
+    1,
+    1,
+    1,
+  );
+  db.close();
+}
+
 /** Runs the CLI the way a user would, with the password supplied out of band. */
-const run = (...args: string[]): string =>
+const run = (...args: string[]): string => runWith(undefined, ...args);
+
+const runWith = (input: string | undefined, ...args: string[]): string =>
   execFileSync(process.execPath, ['--import', 'tsx', cli, ...args], {
     encoding: 'utf8',
+    input,
     env: {
       ...process.env,
       HOME: sandbox,
       COOKIEJAR_HOME: path.join(sandbox, '.cookiejar'),
       COOKIEJAR_PASSWORD: 'a-good-password',
-      // Somewhere nothing is listening, so no daemon-clobber warning fires.
+      // Somewhere nothing is listening: these runs never expect a daemon.
       COOKIEJAR_PORT: '4188',
     },
   });
 
 fakeChromeProfile();
+fakeFirefoxProfile();
 
 test('the terminal can do the whole flow without the app', () => {
-  assert.match(run('setup'), /Which browsers do you use\?/);
+  // Answering "1" picks Chrome only, and that answer has to hold afterwards.
+  assert.match(runWith('1\n', 'setup'), /Which browsers do you use\?/);
   assert.match(run('status'), /browsers {3}chrome/);
 
   assert.match(run('sites'), /example\.com/);
   const cookies = run('cookies', 'example.com');
   assert.match(cookies, /session/);
   assert.doesNotMatch(cookies, /sess-value/, 'cookie values never reach the terminal');
+  assert.doesNotMatch(cookies, /ff-only/, 'browsers left out of setup are not read');
+  assert.match(run('cookies', 'example.com', '--all'), /ff-only/, '--all ignores the setup answer');
 
   const created = run('bundle', 'new', 'example agent');
   const bundleId = /created (\S+)/.exec(created)![1];

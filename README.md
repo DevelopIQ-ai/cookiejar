@@ -97,6 +97,7 @@ your master password, or reads `COOKIEJAR_PASSWORD` for scripts.
 cookiejar doctor                                 # what can be read here, and why not
 cookiejar sites                                  # every site you have cookies for
 cookiejar cookies linear.app                     # names only — values are never printed
+                                                 # (add --all to look past the browsers you picked)
 
 cookiejar bundle new "linear agent"
 cookiejar bundle add linear-agent-9f0b73 linear.app --pick   # tick cookies, terminal style
@@ -192,7 +193,8 @@ WAL) and never writes to them.
 
 - The vault protects bundle *definitions*, not cookie values — values live in your browser only.
 - An agent token is worth exactly one bundle, only while `cookiejar serve` is running, and only until
-  `cookiejar token revoke` (or the daemon auto-locks after 30 idle minutes).
+  `cookiejar token revoke` (or the daemon auto-locks after 30 idle minutes). Revoking takes effect on
+  the agent's next request — the running daemon does not need restarting.
 - Every access is appended to `~/.cookiejar/audit.log` with the bundle, token label, and what was
   asked for. Values are never logged.
 - Prefer *proxy only* tokens and per-site bundles. Cookies are bearer credentials: anything you put in

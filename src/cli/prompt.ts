@@ -1,14 +1,23 @@
 import readline from 'node:readline/promises';
 import { Writable } from 'node:stream';
 
-/** Asks a question on the terminal. Returns '' when stdin is not interactive. */
+/**
+ * Asks a question on the terminal. Piped answers work too, so these commands
+ * can be scripted; an empty stdin just takes the default.
+ */
 export async function ask(question: string): Promise<string> {
-  if (!process.stdin.isTTY) return '';
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: Boolean(process.stdin.isTTY),
+  });
   try {
-    return (await rl.question(question)).trim();
+    const answered = rl.question(question);
+    const endOfInput = new Promise<string>((resolve) => rl.once('close', () => resolve('')));
+    return (await Promise.race([answered, endOfInput])).trim();
   } finally {
     rl.close();
+    if (!process.stdin.isTTY) process.stdin.pause();
   }
 }
 

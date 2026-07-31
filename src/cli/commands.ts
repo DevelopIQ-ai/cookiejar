@@ -42,7 +42,7 @@ export async function setup(vault: Vault): Promise<void> {
   const installed = installedBrowsers();
   if (installed.length === 0) throw new CliError('no browser profiles found on this machine');
 
-  console.log('Which browsers do you use? cookiejar only reads the ones you pick.\n');
+  console.log('Which browsers do you use? Only the ones you pick are read when picking cookies.\n');
   installed.forEach((browser, index) => {
     const note = browser === 'safari' && safariAccess().state !== 'ok' ? '  (needs one permission)' : '';
     console.log(`  ${index + 1}. ${BROWSER_NAMES[browser]}${note}`);
@@ -64,6 +64,7 @@ export async function setup(vault: Vault): Promise<void> {
   setPreferences(vault, chosen, true);
   console.log(`\nSaved: ${chosen.map((browser) => BROWSER_NAMES[browser]).join(', ')}.`);
   console.log('Next: cookiejar sites  ·  cookiejar bundle new <name>');
+  console.log('(sites, cookies and bundle add take --all if you want the other browsers too)');
 }
 
 export function status(vault: Vault, daemonUrl: string, daemonRunning: boolean): void {
@@ -94,8 +95,19 @@ export function doctor(): void {
   }
 }
 
-export function listSites(opts: { profileId?: string; filter?: string }): void {
-  const reads = profileHealth(opts.profileId ? [opts.profileId] : undefined).usable;
+/**
+ * The browsers `cookiejar setup` was told about. Picking cookies honours that
+ * answer; `doctor` and `profiles` deliberately do not, since their job is to
+ * report what this machine actually has.
+ */
+export function chosenBrowsers(vault: Vault, all = false): BrowserId[] | undefined {
+  if (all) return undefined;
+  const preferences = vault.read().preferences;
+  return preferences?.onboardedAt && preferences.browsers.length > 0 ? preferences.browsers : undefined;
+}
+
+export function listSites(vault: Vault, opts: { profileId?: string; filter?: string; all?: boolean }): void {
+  const reads = profileHealth(opts.profileId ? [opts.profileId] : undefined, chosenBrowsers(vault, opts.all)).usable;
   const sites = new Map<string, { cookies: number; profiles: Set<string> }>();
   for (const read of reads) {
     for (const cookie of read.cookies) {
@@ -110,6 +122,7 @@ export function listSites(opts: { profileId?: string; filter?: string }): void {
   const rows = [...sites.entries()].sort((a, b) => b[1].cookies - a[1].cookies || a[0].localeCompare(b[0]));
   if (rows.length === 0) {
     console.log('No cookies found. Sign in somewhere in your browser, then try again.');
+    if (chosenBrowsers(vault)) console.log('Only the browsers you picked in setup are read — cookiejar sites --all shows the rest.');
     return;
   }
   const width = Math.max(...rows.map(([site]) => site.length));
@@ -118,8 +131,8 @@ export function listSites(opts: { profileId?: string; filter?: string }): void {
   }
 }
 
-function cookiesForSite(site: string, profileId?: string): CookieMeta[] {
-  return profileHealth(profileId ? [profileId] : undefined)
+function cookiesForSite(site: string, profileId?: string, browsers?: BrowserId[]): CookieMeta[] {
+  return profileHealth(profileId ? [profileId] : undefined, browsers)
     .usable.flatMap((read) => read.cookies)
     .filter((cookie) => domainCovers(site, cookie.domain))
     .map(toMeta)
@@ -127,8 +140,8 @@ function cookiesForSite(site: string, profileId?: string): CookieMeta[] {
 }
 
 /** Values are never printed: the terminal only ever sees names and metadata. */
-export function listCookies(site: string, profileId?: string): void {
-  const cookies = cookiesForSite(site, profileId);
+export function listCookies(vault: Vault, site: string, opts: { profileId?: string; all?: boolean } = {}): void {
+  const cookies = cookiesForSite(site, opts.profileId, chosenBrowsers(vault, opts.all));
   if (cookies.length === 0) throw new CliError(`no cookies for ${site}`);
   const width = Math.max(...cookies.map((cookie) => cookie.name.length));
   const domainWidth = Math.max(...cookies.map((cookie) => cookie.domain.length));
@@ -199,9 +212,9 @@ export async function bundleAdd(
   vault: Vault,
   bundleId: string,
   site: string,
-  opts: { profileId?: string; names?: string[]; pick?: boolean },
+  opts: { profileId?: string; names?: string[]; pick?: boolean; all?: boolean },
 ): Promise<void> {
-  const cookies = cookiesForSite(site, opts.profileId);
+  const cookies = cookiesForSite(site, opts.profileId, chosenBrowsers(vault, opts.all));
   if (cookies.length === 0) throw new CliError(`no cookies for ${site}`);
 
   const profileIds = [...new Set(cookies.map((cookie) => cookie.profileId))];
