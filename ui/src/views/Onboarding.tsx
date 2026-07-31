@@ -89,7 +89,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               cookiejar only reads the ones you pick, and only when you ask it to.
             </p>
             <div className="card plain stack" style={{ textAlign: 'left' }}>
-              <Label colour="blue">Found on this Mac</Label>
+              <Label colour="blue">Found on this machine</Label>
               <div className="choices">
                 {options.map((browser) => (
                   <button
@@ -100,8 +100,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                     onClick={() => toggle(browser)}
                   >
                     <span className="glyph">{browserGlyph(browser)}</span>
-                    <span>{browserName(browser)}</span>
-                    {browser === 'safari' && data.safari !== 'ok' ? <span className="tiny faint">needs permission</span> : null}
+                    <span className="grow">
+                      {browserName(browser)}
+                      {browser === 'safari' && data.safari !== 'ok' ? (
+                        <span className="tiny faint block">needs one permission</span>
+                      ) : null}
+                    </span>
+                    <span className="tick">{chosen.includes(browser) ? '✓' : ''}</span>
                   </button>
                 ))}
               </div>

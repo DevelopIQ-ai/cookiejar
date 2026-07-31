@@ -18,7 +18,7 @@ function mcpSnippet(bundleName: string, token: string, remoteUrl?: string): stri
   );
 }
 
-const TUNNEL_COMMAND = 'cloudflared tunnel --url http://127.0.0.1:4088';
+const tunnelCommand = (): string => `cloudflared tunnel --url http://${window.location.host}`;
 
 function fetchExample(url: string): string {
   return `curl -X POST ${url}/agent/fetch \\
@@ -39,7 +39,7 @@ function HandoffPanel({ bundle }: { bundle: Bundle }) {
       <Label colour="blue">Give it to an agent</Label>
       <div className="inline">
         <button className="chip" aria-pressed={where === 'local'} onClick={() => setWhere('local')}>
-          On this Mac
+          Agent on this machine
         </button>
         <button className="chip" aria-pressed={where === 'cloud'} onClick={() => setWhere('cloud')}>
           Agent in the cloud
@@ -49,7 +49,7 @@ function HandoffPanel({ bundle }: { bundle: Bundle }) {
       {where === 'local' ? (
         <>
           <p className="tiny muted" style={{ margin: 0 }}>
-            Paste this into Claude Code, Cursor, or any MCP client running on this machine, with the token you issued below.
+            Paste this into Claude Code, Cursor, or any MCP client running on this machine, with the token you issued above.
           </p>
           <pre className="snippet">{mcpSnippet(bundle.id, 'cjr_…')}</pre>
           <Copyable value={mcpSnippet(bundle.id, 'cjr_…')} label="Copy MCP config" />
@@ -57,14 +57,14 @@ function HandoffPanel({ bundle }: { bundle: Bundle }) {
       ) : (
         <>
           <p className="tiny muted" style={{ margin: 0 }}>
-            Cookies never have to leave this Mac. Expose the local daemon over a tunnel, then give the cloud agent a{' '}
+            Cookies never have to leave this machine. Expose the local daemon over a tunnel, then give the cloud agent a{' '}
             <strong>proxy-only</strong> token: it can make authenticated requests, but never sees a cookie value. Revoking the
             token or locking the jar cuts it off instantly.
           </p>
           <div className="stack" style={{ gap: 8 }}>
-            <span className="tiny faint">1 · Run a tunnel on this Mac (Tailscale Funnel or ngrok work the same way).</span>
-            <pre className="snippet">{TUNNEL_COMMAND}</pre>
-            <Copyable value={TUNNEL_COMMAND} label="Copy tunnel command" />
+            <span className="tiny faint">1 · Run a tunnel here (Tailscale Funnel or ngrok work the same way).</span>
+            <pre className="snippet">{tunnelCommand()}</pre>
+            <Copyable value={tunnelCommand()} label="Copy tunnel command" />
           </div>
           <div className="field">
             <span className="tiny faint">2 · Paste the URL the tunnel printed.</span>

@@ -453,6 +453,18 @@ pre.snippet {
 .choice .glyph {
   font-size: 17px;
 }
+.choice .grow {
+  flex: 1;
+  min-width: 0;
+}
+.choice .block {
+  display: block;
+}
+.choice .tick {
+  color: var(--green);
+  font-size: 13px;
+  width: 12px;
+}
 
 ol.steps {
   margin: 0;

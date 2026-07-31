@@ -88,6 +88,19 @@ cookiejar header --url-target https://linear.app/team  # a single Cookie header
 `POST /agent/fetch` is the safest option: cookies never leave the machine, and the request is refused
 unless the target host is one the bundle actually holds cookies for.
 
+## Handing a bundle to an agent in the cloud
+
+The daemon listens on loopback, so a remote agent needs one of two things.
+
+1. **Tunnel it (recommended).** Issue a token with *hide raw cookie values* ticked, expose the daemon
+   (`cloudflared tunnel --url http://127.0.0.1:4088`, `tailscale funnel 4088`, `ngrok http 4088`),
+   and give the agent the tunnel URL plus the token — as MCP
+   (`npx -y @puffle/cookiejar mcp --url https://…`) or straight `POST /agent/fetch`. Values stay on
+   your machine; revoking the token or locking the jar cuts access instantly. **Bundles → Give it to
+   an agent → Agent in the cloud** prints the exact commands.
+2. **Export it.** `cookiejar export --format storage-state --out state.json` and upload that to the
+   agent. Simplest, but the cookie values leave your machine and go stale on your next re-login.
+
 ## Browser support
 
 | Browser | macOS | Linux | Notes |
