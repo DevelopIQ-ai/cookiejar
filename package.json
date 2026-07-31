@@ -1,5 +1,5 @@
 {
-  "name": "cookiejar",
+  "name": "@puffle/cookiejar",
   "version": "0.1.0",
   "description": "Local-only cookie bundle manager: pick cookies from your browsers, group them into password-protected bundles, hand a bundle to a coding agent.",
   "license": "MIT",
@@ -14,6 +14,26 @@
     "dist",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DevelopIQ-ai/cookiejar.git"
+  },
+  "homepage": "https://github.com/DevelopIQ-ai/cookiejar#readme",
+  "bugs": {
+    "url": "https://github.com/DevelopIQ-ai/cookiejar/issues"
+  },
+  "keywords": [
+    "cookies",
+    "mcp",
+    "browser",
+    "automation",
+    "agent",
+    "auth",
+    "cli"
+  ],
   "scripts": {
     "build": "npm run build:server && npm run build:ui",
     "build:server": "tsc -p tsconfig.json",
@@ -22,7 +42,8 @@
     "start": "node dist/cli.js ui",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm --prefix ui run typecheck",
     "lint": "eslint .",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

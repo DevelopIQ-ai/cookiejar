@@ -32,10 +32,17 @@ agent (or anyone else) getting a copy of your whole browser.
 Requires Node 22.5+ (for the built-in SQLite reader).
 
 ```bash
+npm install -g @puffle/cookiejar
+cookiejar ui --open
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/DevelopIQ-ai/cookiejar
 cd cookiejar
 npm install && npm run build
-node dist/cli.js ui --open      # or: npm link && cookiejar ui --open
+node dist/cli.js ui --open
 ```
 
 Open http://127.0.0.1:4088, choose a master password, and pick your cookies.
@@ -51,7 +58,7 @@ Issue a token in **Bundles → Agent access**, then give the agent one of these.
   "mcpServers": {
     "cookiejar-ticket-triage": {
       "command": "npx",
-      "args": ["-y", "cookiejar", "mcp"],
+      "args": ["-y", "@puffle/cookiejar", "mcp"],
       "env": { "COOKIEJAR_TOKEN": "cjr_…" }
     }
   }
