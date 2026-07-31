@@ -88,6 +88,27 @@ test('a redacted token can only proxy', async () => {
   assert.equal((await agent('/agent/bundle', token)).status, 200);
 });
 
+test('a revocation from the terminal cuts a token off at once, and survives', async () => {
+  const token = tokenFor({ label: 'leaked', allowFetch: true });
+  // The daemon caches the jar and writes it back as tokens are used.
+  assert.equal((await agent('/agent/bundle', token)).status, 200);
+
+  const terminal = new Vault();
+  terminal.unlock('a-good-password');
+  const grant = terminal.bundle(bundle.id).grants.find((g) => g.label === 'leaked')!;
+  revokeGrant(terminal, bundle.id, grantId(grant));
+
+  assert.equal((await agent('/agent/bundle', token)).status, 403, 'no daemon restart needed');
+  assert.equal((await agent('/agent/bundle', token)).status, 403);
+
+  const onDisk = new Vault();
+  onDisk.unlock('a-good-password');
+  assert.ok(
+    onDisk.bundle(bundle.id).grants.find((g) => g.label === 'leaked')!.revokedAt,
+    'the daemon does not write the revocation away',
+  );
+});
+
 test('locking the jar cuts off agent tokens', async () => {
   const token = tokenFor({ label: 'until-lock', allowFetch: true });
   assert.equal((await agent('/agent/bundle', token)).status, 200);
@@ -108,4 +129,20 @@ test('the daemon manages nothing', async () => {
   }
   const health = (await (await fetch(new URL('/health', url))).json()) as { ok: boolean; unlocked: boolean };
   assert.deepEqual(health, { ok: true, unlocked: true });
+});
+
+// Last: changing the password locks the daemon out for good.
+test('changing the master password locks a running daemon out', async () => {
+  const token = tokenFor({ label: 'before-passwd', allowFetch: true });
+  assert.equal((await agent('/agent/bundle', token)).status, 200);
+
+  new Vault().changePassword('a-good-password', 'a-better-password');
+
+  const denied = await agent('/agent/bundle', token);
+  assert.equal(denied.status, 403, 'a locked jar is a refusal, not a server error');
+  assert.match(((await denied.json()) as { error: string }).error, /locked/);
+  assert.equal((await agent('/agent/bundle', token)).status, 403);
+
+  const health = (await (await fetch(new URL('/health', url))).json()) as { unlocked: boolean };
+  assert.equal(health.unlocked, false);
 });

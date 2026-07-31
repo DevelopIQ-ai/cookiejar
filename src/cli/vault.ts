@@ -55,12 +55,3 @@ export async function daemonHoldsVault(url: string): Promise<boolean> {
     return false;
   }
 }
-
-/**
- * The daemon keeps the decrypted jar in memory and rewrites it as tokens get
- * used, so it can clobber an edit made here. Warn rather than refuse.
- */
-export async function warnIfDaemonRunning(url: string): Promise<void> {
-  if (!(await daemonHoldsVault(url))) return;
-  console.error(`warning: cookiejar serve is running at ${url}; restart it so this edit takes effect.`);
-}

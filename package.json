@@ -1,6 +1,6 @@
 {
   "name": "@puffle/cookiejar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-only cookie bundle manager: pick cookies from your browsers, group them into password-protected bundles, hand a bundle to a coding agent.",
   "license": "MIT",
   "type": "module",

@@ -4,8 +4,9 @@ import { startServer } from './server/index.js';
 import { runMcpServer } from './mcp/server.js';
 import { cookieHeaderFor, resolveBundle, toNetscape, toStorageState } from './core/bundles.js';
 import { askSecret } from './cli/prompt.js';
-import { CliError, daemonHoldsVault, openVault, warnIfDaemonRunning } from './cli/vault.js';
+import { CliError, daemonHoldsVault, openVault } from './cli/vault.js';
 import * as cmd from './cli/commands.js';
+import { VERSION } from './core/version.js';
 
 // node:sqlite is how we read cookie stores; its experimental banner is noise here.
 process.removeAllListeners('warning');
@@ -82,12 +83,6 @@ async function localBundleCookies(bundleId: string) {
   return resolveBundle(vault.bundle(bundleId)).cookies;
 }
 
-/** Opens the vault for a command that writes, warning if the daemon could clobber it. */
-async function openForWrite(): Promise<Awaited<ReturnType<typeof openVault>>> {
-  await warnIfDaemonRunning(DEFAULT_URL);
-  return openVault();
-}
-
 const HELP = `cookiejar — local-only cookie bundles for coding agents
 
 A CLI. Commands that touch the jar ask for your master password (or read
@@ -99,16 +94,18 @@ Setting up
   cookiejar doctor                       Which browser profiles can be read, and why not
   cookiejar profiles                     Every discovered profile, including empty ones
   cookiejar passwd                       Change the master password
+  cookiejar version                      Print the version
 
 Picking cookies
-  cookiejar sites [--profile <id>] [--filter <text>]
-  cookiejar cookies <site> [--profile <id>]        Names only — values are never printed
+  cookiejar sites [--profile <id>] [--filter <text>] [--all]
+  cookiejar cookies <site> [--profile <id>] [--all] Names only — values are never printed
+      Only the browsers you picked in setup are read; --all ignores that.
 
 Bundles
   cookiejar bundles                                List bundles
   cookiejar bundle <id>                            Selectors, live cookies, tokens
   cookiejar bundle new <name> [--description <text>]
-  cookiejar bundle add <id> <site> [--profile <id>] [--names a,b] [--pick]
+  cookiejar bundle add <id> <site> [--profile <id>] [--names a,b] [--pick] [--all]
   cookiejar bundle remove <id> <site> [--profile <id>]
   cookiejar bundle rm <id> [--force]
 
@@ -133,6 +130,11 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   switch (args.command) {
+    case 'version':
+    case '--version':
+    case '-v':
+      console.log(VERSION);
+      return;
     case 'serve': {
       const port = flagNumber(args, 'port', DEFAULT_PORT);
       const autoLock = flagNumber(args, 'auto-lock', 30);
@@ -147,7 +149,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'setup': {
-      await cmd.setup(await openForWrite());
+      await cmd.setup(await openVault());
       return;
     }
     case 'status': {
@@ -164,15 +166,22 @@ async function main(): Promise<void> {
     }
     case 'passwd': {
       const current = process.env.COOKIEJAR_PASSWORD ?? (await askSecret('Current master password: '));
-      await cmd.changePassword(await openForWrite(), current);
+      await cmd.changePassword(await openVault(), current);
       return;
     }
     case 'sites': {
-      cmd.listSites({ profileId: flagString(args, 'profile'), filter: flagString(args, 'filter') });
+      cmd.listSites(await openVault(), {
+        profileId: flagString(args, 'profile'),
+        filter: flagString(args, 'filter'),
+        all: flagBool(args, 'all'),
+      });
       return;
     }
     case 'cookies': {
-      cmd.listCookies(positional(args, 0, 'a site'), flagString(args, 'profile'));
+      cmd.listCookies(await openVault(), positional(args, 0, 'a site'), {
+        profileId: flagString(args, 'profile'),
+        all: flagBool(args, 'all'),
+      });
       return;
     }
     case 'bundles': {
@@ -182,20 +191,21 @@ async function main(): Promise<void> {
     case 'bundle': {
       const sub = positional(args, 0, 'a bundle id or subcommand');
       if (sub === 'new') {
-        await cmd.newBundle(await openForWrite(), positional(args, 1, 'a name'), flagString(args, 'description'));
+        await cmd.newBundle(await openVault(), positional(args, 1, 'a name'), flagString(args, 'description'));
         return;
       }
       if (sub === 'add') {
-        await cmd.bundleAdd(await openForWrite(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a site'), {
+        await cmd.bundleAdd(await openVault(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a site'), {
           profileId: flagString(args, 'profile'),
           names: flagString(args, 'names')?.split(',').map((name) => name.trim()).filter(Boolean),
           pick: flagBool(args, 'pick'),
+          all: flagBool(args, 'all'),
         });
         return;
       }
       if (sub === 'remove') {
         cmd.bundleRemove(
-          await openForWrite(),
+          await openVault(),
           positional(args, 1, 'a bundle id'),
           positional(args, 2, 'a site'),
           flagString(args, 'profile'),
@@ -203,7 +213,7 @@ async function main(): Promise<void> {
         return;
       }
       if (sub === 'rm') {
-        await cmd.bundleDelete(await openForWrite(), positional(args, 1, 'a bundle id'), flagBool(args, 'force'));
+        await cmd.bundleDelete(await openVault(), positional(args, 1, 'a bundle id'), flagBool(args, 'force'));
         return;
       }
       cmd.showBundle(await openVault(), sub);
@@ -212,7 +222,7 @@ async function main(): Promise<void> {
     case 'token': {
       const sub = positional(args, 0, 'new or revoke');
       if (sub === 'new') {
-        cmd.newGrant(await openForWrite(), positional(args, 1, 'a bundle id'), {
+        cmd.newGrant(await openVault(), positional(args, 1, 'a bundle id'), {
           label: flagString(args, 'label'),
           days: flagNumber(args, 'days', 30),
           allowFetch: !flagBool(args, 'no-fetch'),
@@ -221,7 +231,7 @@ async function main(): Promise<void> {
         return;
       }
       if (sub === 'revoke') {
-        cmd.revoke(await openForWrite(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a token id'));
+        cmd.revoke(await openVault(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a token id'));
         return;
       }
       throw new CliError('use: cookiejar token new <bundle> | cookiejar token revoke <bundle> <token-id>');

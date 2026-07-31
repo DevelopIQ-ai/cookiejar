@@ -1,4 +1,5 @@
 import readline from 'node:readline';
+import { VERSION } from '../core/version.js';
 
 /**
  * A dependency-free MCP stdio server. It holds no cookies itself: every tool
@@ -128,7 +129,7 @@ export function runMcpServer(options: McpOptions): void {
         reply({
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'cookiejar', version: '0.1.0' },
+          serverInfo: { name: 'cookiejar', version: VERSION },
         });
         return;
       case 'notifications/initialized':

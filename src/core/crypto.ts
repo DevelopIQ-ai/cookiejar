@@ -50,6 +50,13 @@ export function open(box: SealedBox, passphrase: string): { plaintext: string; k
   return { plaintext, key, salt };
 }
 
+/** Decrypts with a key already derived from the passphrase — for re-reading a file we hold open. */
+export function openWithKey(box: SealedBox, key: Buffer): string {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(box.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(box.tag, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(box.ciphertext, 'base64')), decipher.final()]).toString('utf8');
+}
+
 export function newSalt(): Buffer {
   return crypto.randomBytes(16);
 }
