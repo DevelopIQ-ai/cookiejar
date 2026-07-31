@@ -343,8 +343,11 @@ export async function changePassword(vault: Vault, current: string): Promise<voi
 }
 
 export function profiles(): void {
-  for (const read of readAllProfiles()) {
+  const reads = readAllProfiles();
+  const idWidth = Math.max(...reads.map((read) => read.profile.id.length));
+  const labelWidth = Math.max(...reads.map((read) => read.profile.label.length));
+  for (const read of reads) {
     const state = read.error ? read.error : plural(read.cookies.length, 'cookie');
-    console.log(`${pad(read.profile.id, 20)} ${pad(read.profile.label, 24)} ${state}`);
+    console.log(`${pad(read.profile.id, idWidth)}  ${pad(read.profile.label, labelWidth)}  ${state}`);
   }
 }

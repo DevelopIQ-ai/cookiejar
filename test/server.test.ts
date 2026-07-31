@@ -130,3 +130,19 @@ test('the daemon manages nothing', async () => {
   const health = (await (await fetch(new URL('/health', url))).json()) as { ok: boolean; unlocked: boolean };
   assert.deepEqual(health, { ok: true, unlocked: true });
 });
+
+// Last: changing the password locks the daemon out for good.
+test('changing the master password locks a running daemon out', async () => {
+  const token = tokenFor({ label: 'before-passwd', allowFetch: true });
+  assert.equal((await agent('/agent/bundle', token)).status, 200);
+
+  new Vault().changePassword('a-good-password', 'a-better-password');
+
+  const denied = await agent('/agent/bundle', token);
+  assert.equal(denied.status, 403, 'a locked jar is a refusal, not a server error');
+  assert.match(((await denied.json()) as { error: string }).error, /locked/);
+  assert.equal((await agent('/agent/bundle', token)).status, 403);
+
+  const health = (await (await fetch(new URL('/health', url))).json()) as { unlocked: boolean };
+  assert.equal(health.unlocked, false);
+});

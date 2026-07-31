@@ -1,9 +1,11 @@
 import { audit } from './audit.js';
 import { tokenMatches } from './crypto.js';
-import type { Vault } from './vault.js';
+import { VaultLockedError, type Vault } from './vault.js';
 import type { Bundle, BundleGrant } from './types.js';
 
 export class AccessDeniedError extends Error {}
+
+const LOCKED = 'cookiejar is locked; start it with `cookiejar serve`';
 
 export interface Grantee {
   bundle: Bundle;
@@ -16,9 +18,16 @@ export interface Grantee {
  */
 export function authorize(vault: Vault, token: string | undefined): Grantee {
   if (!token) throw new AccessDeniedError('missing bundle token');
-  if (!vault.unlocked) throw new AccessDeniedError('cookiejar is locked; start it with `cookiejar serve`');
   const now = Date.now() / 1000;
-  for (const bundle of vault.read().bundles) {
+  // read() can lock the jar itself, if the master password changed under us.
+  let bundles;
+  try {
+    bundles = vault.read().bundles;
+  } catch (error) {
+    if (error instanceof VaultLockedError) throw new AccessDeniedError(LOCKED);
+    throw error;
+  }
+  for (const bundle of bundles) {
     for (const grant of bundle.grants) {
       if (!tokenMatches(token, grant.tokenHash)) continue;
       if (grant.revokedAt) throw new AccessDeniedError('this token was revoked');

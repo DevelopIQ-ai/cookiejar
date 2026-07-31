@@ -39,37 +39,51 @@ __session`). The overlapping `linear.app` cookie is what makes cross-profile sel
 - Sanity check: `node dist/cli.js doctor` prints `✓ Chrome — Personal (chrome:Default) — 11 cookies…`
   and the Firefox profile.
 
-## Interactive prompts need a REAL PTY, or your test silently no-ops
+## Prompts: `ask()` takes pipes, `askSecret()` is still TTY-only
 
-`ask()` and `askSecret()` (`src/cli/prompt.ts`) return `''` immediately when `process.stdin.isTTY` is
-false. So piping/closing stdin does **not** exercise the prompt — it takes the empty-answer branch and
-can look like a pass. Anything touching the password prompt, the `setup` browser picker, `--pick`, the
-ambiguous-profile chooser, or the `bundle rm` confirm must run on a real PTY (an `exec`-style
-`tty: true` session, or a GUI terminal such as `konsole` when you need to *show* the no-echo behaviour).
+Check `src/cli/prompt.ts` on the branch you are testing — this behaviour changed:
 
-Useful non-TTY corollaries you can assert deliberately:
+- **`ask()`** (browser picker, `--pick`, ambiguous-profile chooser, `bundle rm` confirm) reads piped
+  stdin and falls back to `''` only on EOF. So `printf '1\n' | cj setup` really does pick browser 1,
+  and `cj setup </dev/null` takes the default. Before that fix it returned `''` whenever stdin was not
+  a TTY, which made piped tests silently no-op and *look* like passes.
+- **`askSecret()`** (every password prompt) is still TTY-only and returns `''` off a TTY. Password
+  guards (`<8` chars, mismatch, wrong-password retry) and the no-echo claim must run on a real PTY —
+  an `exec`-style `tty: true` session, or a GUI terminal such as `konsole` when you need to *show*
+  no-echo.
 
-- `cj bundle add <id> <site> 0<&-` (ambiguous site, stdin closed) must refuse with
+When in doubt, assert both paths: a piped answer must take effect, and EOF must take the documented
+default. Useful deliberate assertions:
+
+- `cj bundle rm <id> </dev/null` → prompt shown, **nothing deleted**; `printf 'y\n' | cj bundle rm <id>`
+  → `deleted <id>`.
+- `cj bundle add <id> <site> --all </dev/null` (site in two profiles) must refuse with
   `pass --profile <id> to choose a profile` and add nothing.
-- `cj bundle rm <id>` with non-TTY stdin answers "no" and deletes nothing.
 
 For the no-echo assertion: type the password, screenshot *before* pressing Enter, and confirm zero
 characters (not even asterisks) appear after the prompt.
+
+A command whose stdout you pipe (`cj status | head -4`) also swallows the `Master password:` prompt,
+so the terminal looks hung when it is just waiting for input. Set `COOKIEJAR_PASSWORD` when you only
+want the output.
 
 ## Capturing tokens in scripts
 
 Tokens are `cjr_` + `base64url`, so they can contain `-` and `_`. **Do not** parse them with
 `grep -o '^cjr_[A-Za-z0-9]*'` — it truncates silently and you end up testing a garbage token that
-404s/403s for the wrong reason. Use `head -1`:
+403s for the wrong reason (`unknown bundle token`), which can masquerade as a passing security test.
 
 ```bash
-cj token new $B --label devin --days 30 >/tmp/tok.txt 2>/dev/null   # stderr may carry a daemon warning
-T=$(head -1 /tmp/tok.txt)
-G=$(sed -n '3p' /tmp/tok.txt | cut -d' ' -f1)   # grant id, only when stderr was NOT merged in
+cj token new $B --label devin --days 30 >/tmp/tok.txt 2>/dev/null
+T=$(grep -oE '^cjr_[A-Za-z0-9_-]+' /tmp/tok.txt)   # token
+G=$(grep -oE '^[0-9a-f]{12}' /tmp/tok.txt | head -1)  # grant id
 ```
 
-Redirect stderr separately: when `cookiejar serve` is running, write commands prepend
-`warning: cookiejar serve is running…` to stderr and shift your line numbers if you use `2>&1`.
+Bundle ids are **slugs**, not bare hex — `bundle new "agent demo"` yields `agent-demo-96c519`. Parse
+them as `cj bundle new "x" | head -1 | awk '{print $2}'`; a `[0-9a-f]{12}` regex matches nothing.
+
+`timeout` cannot resolve a shell alias/function, so `timeout 12 cj mcp` dies with
+`No such file or directory`. Use the full `node <repo>/dist/cli.js` path inside `timeout`.
 
 ## CLI paths worth exercising
 
@@ -126,8 +140,29 @@ re-testing every time:
   used to erase it). `/tmp/revoke-check.sh`-style scripts must capture the token with
   `grep -oE '^cjr_[A-Za-z0-9_-]+'` — `[A-Za-z0-9]*` truncates it and every request 403s for the
   wrong reason.
-- Changing the master password while `serve` runs locks the daemon out; agents get
-  `cookiejar is locked`.
+- Changing the master password while `serve` runs locks the daemon out. Note the **first** request
+  after `cookiejar passwd` may come back `500 {"error":"vault is locked"}` rather than a 403:
+  `authorize()` checks `vault.unlocked` before `vault.read()`, and `syncFromDisk()` locks *inside*
+  `read()`, so a `VaultLockedError` escapes the `AccessDeniedError` branch in `src/server/index.ts`.
+  Later requests give the correct 403. Assert the status you actually expect and treat a lone 500 as
+  a (minor) defect, not a pass — no cookie values are served either way.
+
+### Browser preference filtering (`--all`)
+
+`sites`, `cookies <site>` and `bundle add` only read the browsers picked in `cookiejar setup`
+(`chosenBrowsers()` in `src/cli/commands.ts`); `--all` opts out. `doctor` and `profiles` deliberately
+still show everything. Consequences for tests:
+
+- The discriminating check is `sites` vs `sites --all` — with Chrome-only picked, the Firefox-only
+  site (`reddit.com`) must be absent from the first and present in the second, and `linear.app` must
+  go from `1 cookie` to `2 cookies` across both profiles. If the two outputs are identical, the
+  preference is not being enforced.
+- **Cross-profile ambiguity tests now need `--all`.** With Chrome-only picked, `bundle add <id>
+  linear.app` is unambiguous and just succeeds; only `--all` re-creates the two-profile conflict.
+- Because they need the preference, `sites` and `cookies` now **open the vault**, i.e. they prompt
+  for the master password. Set `COOKIEJAR_PASSWORD` for scripted runs. With it unset and stdin
+  closed they fail cleanly (`could not unlock the jar`, exit 1) after printing
+  `wrong master password` three times — noisy but not a hang.
 
 ### Proving `set-cookie` stripping properly
 
