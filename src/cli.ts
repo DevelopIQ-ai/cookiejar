@@ -137,13 +137,20 @@ async function main(): Promise<void> {
     }
     case 'doctor': {
       const reads = readAllProfiles();
-      if (reads.length === 0) console.log('No browser profiles found.');
-      for (const read of reads) {
+      const readable = reads.filter((read) => !read.error && read.cookies.length > 0);
+      const safariBlocked = reads.some((read) => read.profile.browser === 'safari' && read.error);
+
+      if (readable.length === 0) {
+        if (reads.length > 0) console.log('No profiles with readable cookies found.');
+        else console.log('No browser profiles found.');
+      }
+      for (const read of readable) {
         const sites = new Set(read.cookies.map((c) => bareDomain(c.domain))).size;
+        console.log(`✓ ${read.profile.label} (${read.profile.id}) — ${read.cookies.length} cookies across ${sites} sites`);
+      }
+      if (safariBlocked) {
         console.log(
-          read.error
-            ? `✗ ${read.profile.label} (${read.profile.id})\n    ${read.error}`
-            : `✓ ${read.profile.label} (${read.profile.id}) — ${read.cookies.length} cookies across ${sites} sites`,
+          '\nSafari cookies are protected by macOS Full Disk Access. Grant it to the terminal or app running cookiejar (System Settings → Privacy & Security → Full Disk Access), then run doctor again.',
         );
       }
       return;
