@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cookiejar — Local-only cookie bundles for coding agents</title>
+  <meta name="description" content="Pick cookies from your own browsers, group them into named bundles, and hand a revocable token to a coding agent. Values stay on your machine.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            muted: '#737373',
+            'muted-foreground': '#525252',
+            border: '#e5e5e5',
+            danger: '#fb2c36',
+            success: '#00c950',
+            brand: '#0a0a0a',
+            amber: '#f59e0b',
+          },
+          backgroundImage: {
+            'dot-pattern': 'radial-gradient(#d4d4d4 1.2px, transparent 1.2px)',
+          },
+          boxShadow: {
+            'floating': '0 24px 80px -20px rgba(0,0,0,0.12), 0 8px 24px -12px rgba(0,0,0,0.08)',
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    .dot-bg {
+      background-image: radial-gradient(#d4d4d4 1.2px, transparent 1.2px);
+      background-size: 28px 28px;
+    }
+    .code-block {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+    }
+    .window-glass {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+    }
+    details > summary {
+      list-style: none;
+    }
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#fafafa] dot-bg text-brand antialiased">
+
+  <!-- Top bar -->
+  <header class="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+    <a href="/" class="text-sm font-semibold tracking-tight text-black">cookiejar</a>
+    <nav class="flex items-center gap-2">
+      <a href="https://github.com/DevelopIQ-ai/cookiejar" target="_blank" rel="noopener" class="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm text-muted-foreground transition hover:text-black hover:shadow-sm">
+        <svg class="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+        </svg>
+        GitHub
+      </a>
+      <a href="https://www.npmjs.com/package/@puffle/cookiejar" target="_blank" rel="noopener" class="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm text-muted-foreground transition hover:text-black hover:shadow-sm">
+        <svg class="h-4 w-4" viewBox="0 0 18 7" fill="currentColor" aria-hidden="true">
+          <path d="M0 0h18v6H9v1H5V6H0V0Zm1 5h2V2h1v3h1V1H1v4Zm5-4v5h2V5h2V1H6Zm2 1h1v2H8V2Zm3-1v4h2V2h1v3h1V2h1v3h1V1h-6Z"/>
+        </svg>
+        npm
+      </a>
+    </nav>
+  </header>
+
+  <main class="mx-auto max-w-3xl px-4 pb-16 pt-8 md:pb-24 md:pt-14">
+
+    <!-- Hero -->
+    <div class="text-center">
+      <h1 class="text-5xl font-semibold tracking-tight text-black sm:text-6xl">Stop copying cookies<br class="hidden sm:block"> out of your browser</h1>
+      <p class="mx-auto mt-5 max-w-xl text-lg text-muted-foreground">Your coding agent can't log into Linear, GitHub, or your admin panel. <span class="text-black">cookiejar</span> picks the exact cookies an agent needs, groups them into a password-protected bundle, and hands them a token — without copying your whole browser.</p>
+      <p class="mx-auto mt-3 max-w-xl text-sm text-muted">Free and open source. A CLI. Nothing else.</p>
+
+      <div class="mx-auto mt-8 max-w-sm">
+        <img src="hero.png" alt="A cookie jar holding browser cookies, handing one to an agent" class="mx-auto h-auto w-full rounded-2xl object-cover shadow-floating" width="512" height="512" loading="eager">
+      </div>
+
+      <!-- Primary command -->
+      <div class="mx-auto mt-8 max-w-xl">
+        <div class="flex items-center gap-3 rounded-xl border border-black bg-black px-4 py-3.5 text-left shadow-floating">
+          <span class="code-block select-none text-success">$</span>
+          <code class="code-block flex-1 overflow-x-auto whitespace-nowrap text-white">npm install -g @puffle/cookiejar</code>
+          <button class="copy-btn shrink-0 rounded-md p-1.5 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Copy command" data-copy="npm install -g @puffle/cookiejar">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+        <p class="mt-3 text-sm text-muted">Needs Node 22+. Next: <code class="rounded border border-border bg-white px-1 font-mono text-xs">cookiejar setup</code> creates the encrypted jar.</p>
+      </div>
+    </div>
+
+    <!-- Why -->
+    <section class="mt-20">
+      <h2 class="text-center text-2xl font-semibold tracking-tight text-black">Why you'd want this</h2>
+      <div class="mx-auto mt-8 grid max-w-2xl gap-4 sm:grid-cols-2">
+        <div class="rounded-xl border border-border bg-white p-5 text-left">
+          <h3 class="text-sm font-semibold text-black">Cookies are already there</h3>
+          <p class="mt-2 text-sm text-muted-foreground">You logged in once in Chrome or Safari. cookiejar reads those sessions live and turns them into a token, so the agent doesn't need its own login.</p>
+        </div>
+        <div class="rounded-xl border border-border bg-white p-5 text-left">
+          <h3 class="text-sm font-semibold text-black">Values never leave your machine</h3>
+          <p class="mt-2 text-sm text-muted-foreground">The encrypted vault stores only <em>which</em> cookies a bundle can use. Values are read fresh from the browser each time. Re-logging refreshes the agent automatically.</p>
+        </div>
+        <div class="rounded-xl border border-border bg-white p-5 text-left">
+          <h3 class="text-sm font-semibold text-black">One switch to cut it off</h3>
+          <p class="mt-2 text-sm text-muted-foreground">Revoke a token, stop the daemon, lock the jar, or hit the auto-lock timer — every agent loses access immediately, even mid-session.</p>
+        </div>
+        <div class="rounded-xl border border-border bg-white p-5 text-left">
+          <h3 class="text-sm font-semibold text-black">Cloud agents, no secrets</h3>
+          <p class="mt-2 text-sm text-muted-foreground">Tunnel the daemon and issue a proxy-only token. The agent can make authenticated requests but never sees the cookie itself.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="mt-20">
+      <h2 class="text-center text-2xl font-semibold tracking-tight text-black">How it works</h2>
+      <ol class="mx-auto mt-8 max-w-2xl space-y-3">
+        <li class="flex gap-4 rounded-xl border border-border bg-white p-5 text-left">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black text-xs font-medium text-white">1</span>
+          <p class="text-sm text-muted-foreground"><span class="font-medium text-black">Set up the jar.</span> <code class="rounded border border-border bg-gray-50 px-1 font-mono text-xs">cookiejar setup</code> asks which browsers you use and creates an encrypted vault at <code class="rounded border border-border bg-gray-50 px-1 font-mono text-xs">~/.cookiejar</code>.</p>
+        </li>
+        <li class="flex gap-4 rounded-xl border border-border bg-white p-5 text-left">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black text-xs font-medium text-white">2</span>
+          <p class="text-sm text-muted-foreground"><span class="font-medium text-black">Pick cookies and make a bundle.</span> <code class="rounded border border-border bg-gray-50 px-1 font-mono text-xs">cookiejar cookies linear.app</code> shows names and flags only. Pick the ones an agent needs, then create a bundle and issue a token.</p>
+        </li>
+        <li class="flex gap-4 rounded-xl border border-border bg-white p-5 text-left">
+          <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black text-xs font-medium text-white">3</span>
+          <p class="text-sm text-muted-foreground"><span class="font-medium text-black">Hand the token to an agent.</span> Start <code class="rounded border border-border bg-gray-50 px-1 font-mono text-xs">cookiejar serve</code> and give the agent the MCP config, a CLI command, or the HTTP endpoint. Locking the jar cuts them off instantly.</p>
+        </li>
+      </ol>
+    </section>
+
+    <div class="mt-20 text-center">
+      <h2 class="text-2xl font-semibold tracking-tight text-black">Try it in one command</h2>
+      <p class="mx-auto mt-2 max-w-lg text-sm text-muted-foreground">Install, set up, and create your first bundle from the terminal:</p>
+    </div>
+
+    <!-- Mode tabs -->
+    <div class="mt-8 flex justify-center">
+      <div class="inline-flex items-center rounded-full border border-border bg-white p-1 shadow-sm" id="mode-tabs">
+        <button class="mode-btn rounded-full px-4 py-1.5 text-sm font-medium transition" data-mode="cli">cli</button>
+        <button class="mode-btn rounded-full px-4 py-1.5 text-sm font-medium text-muted transition" data-mode="mcp">mcp</button>
+        <button class="mode-btn rounded-full px-4 py-1.5 text-sm font-medium text-muted transition" data-mode="agent">agent prompt</button>
+      </div>
+    </div>
+
+    <!-- Command block -->
+    <div class="mx-auto mt-6 max-w-xl">
+      <div id="cli-panel" class="block">
+        <div class="flex items-center justify-between rounded-t-xl border border-border bg-white px-4 py-3">
+          <div class="code-block overflow-x-auto whitespace-nowrap text-muted">$ npm i -g @puffle/cookiejar && cookiejar setup</div>
+          <button class="copy-btn shrink-0 rounded-md p-1.5 text-muted hover:bg-gray-100" aria-label="Copy command" data-copy="npm i -g @puffle/cookiejar && cookiejar setup">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="rounded-b-xl border-x border-b border-border bg-[#fafafa] px-4 py-3 text-sm text-muted-foreground">
+          <ul class="space-y-2 text-left">
+            <li class="flex gap-2"><span class="text-muted">•</span> Creates <kbd class="rounded bg-white px-1 font-mono text-xs border border-border">~/.cookiejar</kbd>, encrypted behind a master password</li>
+            <li class="flex gap-2"><span class="text-muted">•</span> Lets you pick which browsers to read from</li>
+            <li class="flex gap-2"><span class="text-muted">•</span> Then <kbd class="rounded bg-white px-1 font-mono text-xs border border-border">cookiejar sites</kbd>, <kbd class="rounded bg-white px-1 font-mono text-xs border border-border">bundle new</kbd>, <kbd class="rounded bg-white px-1 font-mono text-xs border border-border">token new</kbd></li>
+          </ul>
+        </div>
+      </div>
+
+      <div id="mcp-panel" class="hidden">
+        <div class="flex items-center justify-between rounded-t-xl border border-border bg-white px-4 py-3">
+          <span class="code-block text-muted">MCP server config</span>
+          <button class="copy-btn shrink-0 rounded-md p-1.5 text-muted hover:bg-gray-100" aria-label="Copy config" data-copy='{
+  "mcpServers": {
+    "cookiejar": {
+      "command": "npx",
+      "args": ["-y", "@puffle/cookiejar", "mcp"],
+      "env": { "COOKIEJAR_TOKEN": "cjr_…" }
+    }
+  }
+}'>
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="rounded-b-xl border-x border-b border-border bg-[#fafafa] px-4 py-3 text-left text-sm">
+          <pre class="code-block text-muted-foreground">{
+  "mcpServers": {
+    "cookiejar": {
+      "command": "npx",
+      "args": ["-y", "@puffle/cookiejar", "mcp"],
+      "env": { "COOKIEJAR_TOKEN": "cjr_…" }
+    }
+  }
+}</pre>
+        </div>
+      </div>
+
+      <div id="agent-panel" class="hidden">
+        <div class="flex items-center justify-between rounded-t-xl border border-border bg-white px-4 py-2.5">
+          <span class="text-xs font-medium text-muted uppercase tracking-wide">Prompt for coding agents</span>
+          <button class="copy-btn rounded-md p-1.5 text-muted hover:bg-gray-100" aria-label="Copy prompt" data-copy="Set up @puffle/cookiejar from npm, use a fake profile so no real cookies are read, create a bundle for example.com, issue a token, start the daemon, and verify /agent/bundle returns 200. Then stop the daemon and report back.">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="rounded-b-xl border-x border-b border-border bg-[#fafafa] px-4 py-3 text-left text-sm text-muted-foreground">
+          <p class="code-block leading-relaxed text-muted-foreground">Set up <span class="text-black">@puffle/cookiejar</span> from npm, use a fake profile so no real cookies are read, create a bundle for <span class="text-black">example.com</span>, issue a token, start the daemon, and verify <span class="text-black">/agent/bundle</span> returns 200. Then stop the daemon and report back.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- GitHub -->
+    <div class="mt-8 flex justify-center">
+      <a href="https://github.com/DevelopIQ-ai/cookiejar" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-medium text-brand shadow-sm hover:bg-gray-50 transition">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/>
+        </svg>
+        <span>GitHub</span>
+        <span id="star-count" class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-muted">0</span>
+      </a>
+    </div>
+
+    <!-- Client config section -->
+    <section class="mt-20">
+      <h2 class="text-center text-2xl font-semibold tracking-tight text-black">From any language</h2>
+      <p class="mx-auto mt-2 max-w-lg text-center text-sm text-muted-foreground">cookiejar speaks plain HTTP when <code class="rounded border border-border bg-white px-1 font-mono text-xs">cookiejar serve</code> is running. Pick a token up once and use a normal client.</p>
+
+      <div class="mx-auto mt-8 max-w-2xl overflow-hidden rounded-xl border border-border bg-white shadow-floating">
+        <div class="border-b border-border px-4 py-3">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-muted-foreground">Client:</span>
+              <div class="relative">
+                <select id="client-select" class="appearance-none rounded-md border border-border bg-gray-50 px-3 py-1.5 pr-8 text-sm font-medium focus:outline-none">
+                  <option value="curl">cURL</option>
+                  <option value="python">Python</option>
+                  <option value="node">Node</option>
+                </select>
+                <svg class="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m6 9 6 6 6-6"></path>
+                </svg>
+              </div>
+            </div>
+            <button class="copy-btn inline-flex items-center gap-1.5 rounded-md border border-border bg-white px-3 py-1.5 text-xs font-medium hover:bg-gray-50" data-copy-source="client-code">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              Copy configuration
+            </button>
+          </div>
+        </div>
+        <div class="bg-[#fafafa] p-4">
+          <pre id="client-code" class="code-block overflow-x-auto text-muted-foreground"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Terminal screenshot -->
+    <section class="mt-20">
+      <h2 class="text-center text-2xl font-semibold tracking-tight text-black">From the terminal</h2>
+      <p class="mx-auto mt-2 max-w-lg text-center text-sm text-muted-foreground">Every operation is a command. No UI, no browser tab, no account to manage.</p>
+
+      <div class="mx-auto mt-8 w-screen max-w-4xl px-4 sm:px-0 relative left-1/2 -translate-x-1/2">
+        <div class="overflow-hidden rounded-xl border border-border bg-white shadow-floating">
+          <div class="flex items-center justify-between border-b border-border bg-[#f3f4f6] px-4 py-2">
+            <div class="flex items-center gap-2">
+              <span class="h-3 w-3 rounded-full bg-[#fb494b]"></span>
+              <span class="h-3 w-3 rounded-full bg-[#fdb225]"></span>
+              <span class="h-3 w-3 rounded-full bg-[#2ac833]"></span>
+            </div>
+            <div class="text-xs text-muted">Terminal</div>
+            <div class="w-14"></div>
+          </div>
+          <div class="bg-[#0a0a0a] p-4">
+            <pre class="code-block text-[#e5e5e5]"><span class="text-success">$</span> cookiejar sites
+linear.app              2 cookies  chrome:Default
+notion.so               2 cookies  chrome:Default
+github.com              3 cookies  chrome:Default
+
+<span class="text-success">$</span> cookiejar bundle new "linear agent"
+created linear-agent-9f0b73
+
+<span class="text-success">$</span> cookiejar token new linear-agent-9f0b73 --label devin --days 7 --proxy-only
+cjr_····························
+6ca24d828102 · devin · proxy only, values stay here
+
+<span class="text-success">$</span> cookiejar serve
+cookiejar is answering agent tokens at http://127.0.0.1:4088
+auto-lock: 30 idle minutes  ·  stop it to cut every agent off</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="mt-20">
+      <h2 class="text-center text-2xl font-semibold tracking-tight text-black">FAQ</h2>
+      <div class="mx-auto mt-6 max-w-2xl space-y-3">
+        <details class="group rounded-xl border border-border bg-white">
+          <summary class="flex cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium text-brand">
+            What actually is it?
+            <svg class="h-4 w-4 text-muted transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 9 6 6 6-6"></path>
+            </svg>
+          </summary>
+          <div class="px-5 pb-4 text-sm text-muted-foreground">
+            A small CLI you run on your own machine. It reads the cookies your browsers already hold, lets you pick which ones to share, groups them into bundles, and hands each bundle to an agent through a token. The agent talks to a loopback daemon that never leaves your machine unless you tunnel it.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-border bg-white">
+          <summary class="flex cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium text-brand">
+            Does it store my cookies on the internet?
+            <svg class="h-4 w-4 text-muted transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 9 6 6 6-6"></path>
+            </svg>
+          </summary>
+          <div class="px-5 pb-4 text-sm text-muted-foreground">
+            No. The encrypted vault stores only profile, domain, and cookie names. Values are read live from your browsers when an agent asks. There is no cloud service, no account, and no telemetry.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-border bg-white">
+          <summary class="flex cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium text-brand">
+            Can a cloud agent use it?
+            <svg class="h-4 w-4 text-muted transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 9 6 6 6-6"></path>
+            </svg>
+          </summary>
+          <div class="px-5 pb-4 text-sm text-muted-foreground">
+            Yes, with a tunnel. Expose the daemon with cloudflared, Tailscale Funnel, or ngrok, and give the cloud agent a <span class="text-black">proxy-only</span> token. It can call <code class="rounded bg-white px-1 font-mono text-xs border border-border">POST /agent/fetch</code> to make authenticated requests, but the cookie values stay on your machine.
+          </div>
+        </details>
+
+        <details class="group rounded-xl border border-border bg-white">
+          <summary class="flex cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium text-brand">
+            Is it safe to give an agent my cookies?
+            <svg class="h-4 w-4 text-muted transition group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 9 6 6 6-6"></path>
+            </svg>
+          </summary>
+          <div class="px-5 pb-4 text-sm text-muted-foreground">
+            Cookies are bearer credentials — anything you bundle, the agent can act as you with. Keep bundles small, use expiry dates, prefer proxy-only tokens, and revoke access as soon as the agent is done. Every access is written to a local audit log.
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="mt-20 border-t border-border pt-8 text-center text-sm text-muted">
+      <div class="flex justify-center gap-6">
+        <a href="https://github.com/DevelopIQ-ai/cookiejar" class="hover:text-black transition">GitHub</a>
+        <a href="https://www.npmjs.com/package/@puffle/cookiejar" class="hover:text-black transition">npm</a>
+        <a href="https://github.com/DevelopIQ-ai/cookiejar#readme" class="hover:text-black transition">Docs</a>
+      </div>
+      <p class="mt-4 text-xs text-muted-foreground">© 2026 cookiejar. MIT licensed.</p>
+    </footer>
+
+  </main>
+
+  <script>
+    const commands = {
+      curl: `curl http://127.0.0.1:4088/agent/fetch \\
+  -H "Authorization: Bearer cjr_..." \\
+  -H "Content-Type: application/json" \\
+  -d '{"url":"https://linear.app/team","method":"GET"}'`,
+      python: `import requests
+
+r = requests.post(
+    "http://127.0.0.1:4088/agent/fetch",
+    headers={"Authorization": "Bearer cjr_..."},
+    json={"url": "https://linear.app/team", "method": "GET"},
+)
+
+print(r.status_code)
+print(r.text)`,
+      node: `const res = await fetch('http://127.0.0.1:4088/agent/fetch', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer cjr_...',
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ url: 'https://linear.app/team', method: 'GET' }),
+});
+
+const text = await res.text();
+console.log(res.status, text);`
+    };
+
+    const select = document.getElementById('client-select');
+    const codePre = document.getElementById('client-code');
+
+    function setClient(key) {
+      codePre.textContent = commands[key];
+    }
+
+    select.addEventListener('change', (e) => setClient(e.target.value));
+    setClient('curl');
+
+    // Mode tabs
+    const tabs = document.getElementById('mode-tabs');
+    const cliPanel = document.getElementById('cli-panel');
+    const mcpPanel = document.getElementById('mcp-panel');
+    const agentPanel = document.getElementById('agent-panel');
+
+    tabs.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('mode-btn')) return;
+      const mode = e.target.dataset.mode;
+      tabs.querySelectorAll('.mode-btn').forEach(btn => {
+        const active = btn.dataset.mode === mode;
+        btn.classList.toggle('bg-black', active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('text-muted', !active);
+      });
+      cliPanel.classList.toggle('hidden', mode !== 'cli');
+      cliPanel.classList.toggle('block', mode === 'cli');
+      mcpPanel.classList.toggle('hidden', mode !== 'mcp');
+      mcpPanel.classList.toggle('block', mode === 'mcp');
+      agentPanel.classList.toggle('hidden', mode !== 'agent');
+      agentPanel.classList.toggle('block', mode === 'agent');
+    });
+
+    // Initialize active tab
+    const firstTab = tabs.querySelector('[data-mode="cli"]');
+    firstTab.classList.add('bg-black', 'text-white');
+    firstTab.classList.remove('text-muted');
+
+    // Copy buttons
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        let text = btn.dataset.copy;
+        if (!text && btn.dataset.copySource) {
+          text = document.getElementById(btn.dataset.copySource).textContent;
+        }
+        if (!text) return;
+        await navigator.clipboard.writeText(text);
+        const original = btn.innerHTML;
+        btn.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>`;
+        setTimeout(() => btn.innerHTML = original, 1200);
+      });
+    });
+
+    // Star count
+    fetch('https://api.github.com/repos/DevelopIQ-ai/cookiejar')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data.stargazers_count === 'number') {
+          document.getElementById('star-count').textContent = data.stargazers_count;
+        }
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

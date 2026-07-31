@@ -6,10 +6,7 @@
 
 **Local-only cookie bundles for coding agents. A CLI, nothing else.**
 
-You are already logged into GitHub, Linear, Notion, your admin panels. Your agent is not, and half of
-those things have no MCP server. cookiejar lets you pick the exact cookies you are willing to share,
-group them into a **bundle**, and hand that bundle to an agent with a revocable token — without the
-agent (or anyone else) getting a copy of your whole browser.
+You are already logged into Linear, GitHub, Notion, your admin panels. Your agent is not, and a lot of those things have no MCP server. **cookiejar** lets you pick the exact cookies you are willing to share, group them into a named **bundle**, and hand that bundle to an agent with a short-lived, revocable token — without the agent (or anyone else) getting a copy of your whole browser.
 
 ```
    browsers                cookiejar                     agents
@@ -21,17 +18,9 @@ agent (or anyone else) getting a copy of your whole browser.
              everything stays on 127.0.0.1
 ```
 
-- **Local only.** No account, no cloud, no telemetry. The agent daemon binds to `127.0.0.1` and the
-  only outbound requests it ever makes are the ones an agent explicitly proxies.
-- **Password protected.** Bundle definitions live in `~/.cookiejar/vault.json`, encrypted with
-  scrypt + AES-256-GCM. Agent tokens only work while `cookiejar serve` is holding the jar open.
-- **Values are never stored.** A bundle records *which* cookies to use. The values are read live from
-  the browser on every access, so re-logging in the browser is all it takes to refresh an agent, and a
-  stolen vault file leaks nothing but bundle names.
-- **Per-bundle tokens.** Expiry, revocation, an access counter, and an append-only audit log. A token
-  can be marked *proxy only*, so the agent can make authenticated requests but never sees a cookie.
+Three things it does **not** do: it doesn't run in the cloud (the daemon only binds to `127.0.0.1`), it doesn't store cookie values in its vault (it stores only *which* cookies belong in each bundle), and it doesn't make outbound requests except when an agent explicitly asks it to proxy one.
 
-## Install
+## Setup in two commands
 
 Requires Node 22.5+ (for the built-in SQLite reader).
 
@@ -49,7 +38,9 @@ npm install && npm run build
 node dist/cli.js setup
 ```
 
-## A whole session
+`setup` asks which browsers you use and explains Safari's Full Disk Access if you pick it. After that, anything that touches the jar asks for your master password, or reads `COOKIEJAR_PASSWORD` for scripts. `cookiejar reset` throws the jar away if you forget the password.
+
+## A whole minute
 
 ```console
 $ cookiejar setup
@@ -87,49 +78,43 @@ cookiejar is answering agent tokens at http://127.0.0.1:4088
 auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 ```
 
-## Walkthrough
+## What it does
 
-`setup` asks which browsers you use (and explains Safari's Full Disk Access if you pick it), then
-creates the encrypted jar. Everything after that is a command; anything touching the jar asks for
-your master password, or reads `COOKIEJAR_PASSWORD` for scripts.
+| | |
+| --- | --- |
+| **Reads live from your browsers** | Chrome, Chromium, Brave, Edge, Arc, Firefox, and Safari on macOS. It copies the locked SQLite store to a temp file first and never writes back. |
+| **Stores selectors, not values** | The vault holds only profile + domain + cookie names. Values are read fresh every time, so re-logging in the browser refreshes every agent, and a stolen vault file leaks nothing but bundle names. |
+| **Bundles by site** | Pick the cookies an agent actually needs and name the bundle. Add, rename, or remove selectors from the terminal. |
+| **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. Revoke it, or revoke every live token at once. |
+| **Proxy-only mode** | The agent can make authenticated requests through `POST /agent/fetch` but never sees a cookie value. |
+| **MCP, CLI, and HTTP agents** | Tools for `describe_bundle`, `get_cookie_header`, `export_cookies`, `http_request`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
+| **Cuts access instantly** | Stop the daemon, revoke a token, change the master password, or let it auto-lock after 30 idle minutes — every agent loses access on its next request, no restart needed. |
+
+## Use it with real cookies
 
 ```bash
-cookiejar doctor                                 # what can be read here, and why not
-cookiejar sites                                  # every site you have cookies for
-cookiejar cookies linear.app                     # names only — values are never printed
-                                                 # (add --all to look past the browsers you picked)
-
-cookiejar bundle new "linear agent"
-cookiejar bundle add linear-agent-9f0b73 linear.app --pick   # tick cookies, terminal style
-cookiejar bundle linear-agent-9f0b73             # selectors, live contents, tokens
-cookiejar bundle edit linear-agent-9f0b73 --name "linear (devin)"
-
-cookiejar token new linear-agent-9f0b73 --label devin --days 7 --proxy-only
-cookiejar share linear-agent-9f0b73              # MCP + curl config, local and cloud
-cookiejar tokens                                 # every token this jar handed out
-cookiejar token revoke linear-agent-9f0b73 1b027f6ab46c
-cookiejar token revoke --all                     # panic switch: cut every agent off
-cookiejar activity --bundle linear-agent-9f0b73  # audit log
+cookiejar doctor        # see what can be read on this machine, and why not
+cookiejar sites         # list sites you have cookies for
+cookiejar cookies <site> --all   # names and flags; --all reads every browser
 ```
 
-`cookiejar export --bundle <id>` and `cookiejar header --bundle <id>` read the jar directly, so a
-local script needs neither a daemon nor a token. Nothing needs a file edited by hand: `setup
---browsers chrome,firefox` skips the prompts for scripts, and `cookiejar reset` throws the jar away
-if you forget the master password (bundles go, your cookies don't — they were never in it). Run
-`cookiejar help` for the full list.
+Create a bundle, add a site, and issue a token:
 
-## Using a bundle from an agent
+```bash
+cookiejar bundle new "linear agent"
+cookiejar bundle add linear-agent-1d247f linear.app --pick   # tick cookies interactively
+cookiejar token new linear-agent-1d247f --label devin --days 7
+```
 
-Agents talk to `cookiejar serve`, a loopback daemon that answers bundle tokens and nothing else — it
-serves `/agent/*` only, so a token can never create or change a bundle. Start it and leave it
-running while an agent works; stopping it (or `--auto-lock`, 30 idle minutes by default) cuts every
-agent off at once.
+For scripts: `cookiejar setup --browsers chrome,firefox` and `COOKIEJAR_PASSWORD=…`.
+
+## Point any coding agent at it
+
+Start the daemon:
 
 ```bash
 cookiejar serve
 ```
-
-Then give the agent one of these.
 
 **MCP (Devin, Claude Code, Cursor, Codex …)**
 
@@ -165,21 +150,48 @@ cookiejar header --url-target https://linear.app/team  # a single Cookie header
 | `GET /agent/cookies?format=header&url=…` | One `Cookie` header |
 | `POST /agent/fetch` | Proxy a request with the bundle's cookies attached |
 
-`POST /agent/fetch` is the safest option: cookies never leave the machine, and the request is refused
-unless the target host is one the bundle actually holds cookies for.
+`POST /agent/fetch` is the safest option: cookies never leave the machine, and the request is refused unless the target host is one the bundle actually holds cookies for.
 
 ## Handing a bundle to an agent in the cloud
 
 The daemon listens on loopback, so a remote agent needs one of two things.
 
-1. **Tunnel it (recommended).** Issue a `--proxy-only` token, expose the daemon
-   (`cloudflared tunnel --url http://127.0.0.1:4088`, `tailscale funnel 4088`, `ngrok http 4088`),
-   and give the agent the tunnel URL plus the token — as MCP
-   (`npx -y @puffle/cookiejar mcp --url https://…`) or straight `POST /agent/fetch`. Values stay on
-   your machine; revoking the token or stopping the daemon cuts access instantly.
-   `cookiejar share <bundle> --tunnel <url>` prints the exact commands.
-2. **Export it.** `cookiejar export --format storage-state --out state.json` and upload that to the
-   agent. Simplest, but the cookie values leave your machine and go stale on your next re-login.
+1. **Tunnel it (recommended).** Expose `127.0.0.1:4088` with `cloudflared tunnel`, `tailscale funnel`, or `ngrok`, then issue a `--proxy-only` token and give the agent the tunnel URL.
+
+   ```bash
+   cookiejar token new linear-agent-1d247f --label cloud-devin --days 1 --proxy-only
+   cookiejar share linear-agent-1d247f --tunnel https://your-tunnel.trycloudflare.com
+   ```
+
+   Values stay on your machine; revoking the token or stopping the daemon cuts access instantly.
+
+2. **Export it.** `cookiejar export --format storage-state --out state.json` and upload that to the agent. Simplest, but the cookie values leave your machine and go stale on the next re-login.
+
+## Prompt for coding agents
+
+Copy the block below into Claude Code / Cursor / Devin and tell it which site you want to act on. It will install cookiejar, create a demo jar with fake browser data (no real cookies touched), issue a token, and verify the daemon serves it.
+
+````text
+Set up @puffle/cookiejar (https://github.com/DevelopIQ-ai/cookiejar) on this machine for me.
+
+1. Check `node -v` is >= 22.5 — cookiejar uses `node:sqlite`. If older, install Node 22.
+2. Install: `npm install -g @puffle/cookiejar`
+3. Seed a fake profile so no real browser data is touched:
+       curl -L https://raw.githubusercontent.com/DevelopIQ-ai/cookiejar/main/scripts/seed-demo-profile.mjs -o /tmp/seed.mjs
+       node /tmp/seed.mjs /tmp/cjdemo
+   Then run all cookiejar commands with `HOME=/tmp/cjdemo COOKIEJAR_HOME=/tmp/cjdemo/.cookiejar COOKIEJAR_PASSWORD=demo-password-1`.
+4. Set up the jar: `cookiejar setup --browsers chrome`
+5. List sites: `cookiejar sites` — confirm you see `example.com`.
+6. Create a bundle for `example.com`:
+       BUNDLE=$(cookiejar bundle new "demo")
+       cookiejar bundle add "$BUNDLE" example.com --profile chrome:Default
+7. Issue a token: `cookiejar token new "$BUNDLE" --label test --days 1`
+8. Start the daemon: `cookiejar serve --auto-lock=0` and in another shell verify:
+       curl -s http://127.0.0.1:4088/agent/bundle -H "authorization: Bearer <token>"
+9. Stop the daemon and report back the bundle name, the token, and the response.
+
+Rules: do not point at or read any real browser profile, do not log any cookie value, and do not put an agent token in a file you commit.
+````
 
 ## Browser support
 
@@ -192,19 +204,12 @@ The daemon listens on loopback, so a remote agent needs one of two things.
 
 `cookiejar doctor` prints what can and cannot be read on this machine, and why.
 
-Browsers hold a lock on their cookie stores, so cookiejar reads from a temporary copy (including the
-WAL) and never writes to them.
-
 ## Security model
 
 - The vault protects bundle *definitions*, not cookie values — values live in your browser only.
-- An agent token is worth exactly one bundle, only while `cookiejar serve` is running, and only until
-  `cookiejar token revoke` (or the daemon auto-locks after 30 idle minutes). Revoking takes effect on
-  the agent's next request — the running daemon does not need restarting.
-- Every access is appended to `~/.cookiejar/audit.log` with the bundle, token label, and what was
-  asked for. Values are never logged.
-- Prefer *proxy only* tokens and per-site bundles. Cookies are bearer credentials: anything you put in
-  a bundle, the agent can act as you with.
+- An agent token is worth exactly one bundle, only while `cookiejar serve` is running, and only until `cookiejar token revoke` (or the daemon auto-locks). Revoking takes effect on the agent's next request — the daemon does not need restarting.
+- Every access is appended to `~/.cookiejar/audit.log` with the bundle, token label, and what was asked for. Values are never logged.
+- Prefer *proxy only* tokens and per-site bundles. Cookies are bearer credentials: anything you put in a bundle, the agent can act as you with.
 - `Set-Cookie` responses from proxied requests are dropped, so an agent cannot rewrite your session.
 
 ## Development
@@ -216,15 +221,12 @@ npm run lint && npm run typecheck
 HOME=/tmp/cookiejar-demo node scripts/seed-demo-profile.mjs /tmp/cookiejar-demo   # fake browser data
 ```
 
-Layout: `src/core` (crypto, vault, browser readers, bundle resolution, bundle/grant management),
-`src/cli` (commands and prompts), `src/server` (the agent daemon), `src/mcp` (stdio MCP server),
-`test`.
+Layout: `src/core` (crypto, vault, browser readers, bundle resolution, bundle/grant management), `src/cli` (commands and prompts), `src/server` (the agent daemon), `src/mcp` (stdio MCP server), `test`.
 
 ## Contributing
 
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the checks CI runs,
-and the invariants a change has to keep (no values in the vault, no values in output, no runtime
-dependencies, loopback only). Please report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+Issues and PRs welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the checks CI runs, and the invariants a change has to keep (no values in the vault, no values in output, no runtime dependencies, loopback only). Please report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+
 By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 MIT licensed.
