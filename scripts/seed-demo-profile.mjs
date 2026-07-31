@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Builds a throwaway HOME containing a fake Chrome/Firefox cookie store, so the
-// UI can be developed and demoed without touching your real browser data.
+// Builds a throwaway HOME containing a fake Chrome/Firefox cookie store, so
+// cookiejar can be developed and demoed without touching your real browser data.
 //
 //   node scripts/seed-demo-profile.mjs /tmp/cookiejar-demo
-//   HOME=/tmp/cookiejar-demo COOKIEJAR_HOME=/tmp/cookiejar-demo/.cookiejar node dist/cli.js ui
+//   HOME=/tmp/cookiejar-demo COOKIEJAR_HOME=/tmp/cookiejar-demo/.cookiejar node dist/cli.js sites
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';

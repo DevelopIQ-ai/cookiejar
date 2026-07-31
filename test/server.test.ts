@@ -27,72 +27,30 @@ function fakeChromeProfile(): void {
 fakeChromeProfile();
 
 const { startServer } = await import('../src/server/index.js');
-const { url, close } = await startServer({ port: 0, autoLockMinutes: 0 });
-let session = '';
+const { Vault } = await import('../src/core/vault.js');
+const { createBundle, grantId, issueGrant, revokeGrant } = await import('../src/core/manage.js');
 
-const ui = async (path: string, init: RequestInit = {}): Promise<Response> => {
-  const response = await fetch(new URL(path, url), {
-    ...init,
-    headers: { 'content-type': 'application/json', cookie: session, ...(init.headers ?? {}) },
-  });
-  const setCookie = response.headers.get('set-cookie');
-  if (setCookie) session = setCookie.split(';')[0];
-  return response;
-};
-const agent = (path: string, token: string, init: RequestInit = {}): Promise<Response> =>
-  fetch(new URL(path, url), { ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
+const vault = new Vault();
+vault.create('a-good-password');
+const bundle = createBundle(vault, {
+  name: 'Example read',
+  selectors: [{ profileId: 'chrome:Default', domain: 'example.com', names: ['session'] }],
+});
+
+const { url, close } = await startServer({ port: 0, vault, autoLockMinutes: 0 });
+
+const agent = (route: string, token: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(new URL(route, url), { ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
+
+const tokenFor = (options: { label: string; allowFetch?: boolean; redactValues?: boolean }): string =>
+  issueGrant(vault, bundle.id, options).token;
 
 test.after(() => {
   void close().then(() => fs.rmSync(sandbox, { recursive: true, force: true }));
 });
 
-test('locked jar exposes nothing', async () => {
-  const state = (await (await ui('/api/state')).json()) as { vaultExists: boolean; unlocked: boolean };
-  assert.equal(state.vaultExists, false);
-  assert.equal(state.unlocked, false);
-  assert.equal((await ui('/api/bundles')).status, 401);
-});
-
-test('creating the vault unlocks the session and finds browser cookies', async () => {
-  assert.equal((await ui('/api/vault/create', { method: 'POST', body: JSON.stringify({ password: 'short' }) })).status, 400);
-  const created = await ui('/api/vault/create', { method: 'POST', body: JSON.stringify({ password: 'a-good-password' }) });
-  assert.equal(created.status, 200);
-
-  const profiles = (await (await ui('/api/profiles')).json()) as { profiles: Array<{ id: string; cookieCount: number }> };
-  const chrome = profiles.profiles.find((p) => p.id === 'chrome:Default');
-  assert.equal(chrome?.cookieCount, 3);
-
-  const sites = (await (await ui('/api/sites')).json()) as { sites: Array<{ site: string; cookieCount: number }> };
-  assert.equal(sites.sites.find((s) => s.site === 'example.com')?.cookieCount, 2);
-
-  const cookies = (await (await ui('/api/cookies?site=example.com')).json()) as { cookies: Array<Record<string, unknown>> };
-  assert.equal(cookies.cookies.length, 2);
-  assert.ok(!JSON.stringify(cookies.cookies).includes('sess-value'), 'the UI listing must not leak values');
-});
-
-test('a bundle plus token gives an agent exactly the selected cookies', async () => {
-  const { bundle } = (await (
-    await ui('/api/bundles', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: 'Example read',
-        selectors: [{ profileId: 'chrome:Default', domain: 'example.com', names: ['session'] }],
-      }),
-    })
-  ).json()) as { bundle: { id: string } };
-
-  const preview = (await (await ui(`/api/bundles/${bundle.id}/preview`)).json()) as { cookies: Array<{ name: string }> };
-  assert.deepEqual(
-    preview.cookies.map((c) => c.name),
-    ['session'],
-  );
-
-  const { token } = (await (
-    await ui(`/api/bundles/${bundle.id}/grants`, {
-      method: 'POST',
-      body: JSON.stringify({ label: 'test-agent', allowFetch: true, redactValues: false }),
-    })
-  ).json()) as { token: string };
+test('a token gives an agent exactly the selected cookies', async () => {
+  const token = tokenFor({ label: 'test-agent', allowFetch: true });
 
   const jar = await (await agent('/agent/cookies?format=netscape', token)).text();
   assert.ok(jar.includes('sess-value'));
@@ -117,49 +75,37 @@ test('a bundle plus token gives an agent exactly the selected cookies', async ()
 
   assert.equal((await agent('/agent/cookies', 'cjr_wrong')).status, 403);
 
-  const grants = (await (await ui('/api/bundles')).json()) as { bundles: Array<{ grants: Array<{ id: string; useCount: number }> }> };
-  assert.ok(grants.bundles[0].grants[0].useCount >= 3, 'accesses are counted');
+  const grant = vault.bundle(bundle.id).grants.find((g) => g.label === 'test-agent')!;
+  assert.ok(grant.useCount >= 3, 'accesses are counted');
 
-  await ui(`/api/bundles/${bundle.id}/grants/${grants.bundles[0].grants[0].id}`, { method: 'DELETE' });
+  revokeGrant(vault, bundle.id, grantId(grant));
   assert.equal((await agent('/agent/cookies?format=netscape', token)).status, 403);
 });
 
 test('a redacted token can only proxy', async () => {
-  const bundles = (await (await ui('/api/bundles')).json()) as { bundles: Array<{ id: string }> };
-  const { token } = (await (
-    await ui(`/api/bundles/${bundles.bundles[0].id}/grants`, {
-      method: 'POST',
-      body: JSON.stringify({ label: 'proxy-only', allowFetch: true, redactValues: true }),
-    })
-  ).json()) as { token: string };
+  const token = tokenFor({ label: 'proxy-only', allowFetch: true, redactValues: true });
   assert.equal((await agent('/agent/cookies?format=netscape', token)).status, 403);
   assert.equal((await agent('/agent/bundle', token)).status, 200);
 });
 
 test('locking the jar cuts off agent tokens', async () => {
-  const bundles = (await (await ui('/api/bundles')).json()) as { bundles: Array<{ id: string }> };
-  const { token } = (await (
-    await ui(`/api/bundles/${bundles.bundles[0].id}/grants`, {
-      method: 'POST',
-      body: JSON.stringify({ label: 'until-lock', allowFetch: true, redactValues: false }),
-    })
-  ).json()) as { token: string };
+  const token = tokenFor({ label: 'until-lock', allowFetch: true });
   assert.equal((await agent('/agent/bundle', token)).status, 200);
 
-  await ui('/api/vault/lock', { method: 'POST' });
+  vault.lock();
   const denied = await agent('/agent/bundle', token);
   assert.equal(denied.status, 403);
   assert.match(((await denied.json()) as { error: string }).error, /locked/);
 
-  assert.equal((await ui('/api/vault/unlock', { method: 'POST', body: JSON.stringify({ password: 'nope' }) })).status, 401);
-  assert.equal(
-    (await ui('/api/vault/unlock', { method: 'POST', body: JSON.stringify({ password: 'a-good-password' }) })).status,
-    200,
-  );
+  vault.unlock('a-good-password');
   assert.equal((await agent('/agent/bundle', token)).status, 200);
 });
 
-test('cross-origin writes are refused', async () => {
-  const response = await ui('/api/vault/lock', { method: 'POST', headers: { origin: 'https://evil.test' } });
-  assert.equal(response.status, 403);
+test('the daemon manages nothing', async () => {
+  const token = tokenFor({ label: 'curious', allowFetch: true });
+  for (const route of ['/api/bundles', '/api/state', '/']) {
+    assert.equal((await agent(route, token)).status, 404, `${route} is not served`);
+  }
+  const health = (await (await fetch(new URL('/health', url))).json()) as { ok: boolean; unlocked: boolean };
+  assert.deepEqual(health, { ok: true, unlocked: true });
 });

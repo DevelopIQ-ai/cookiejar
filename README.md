@@ -1,6 +1,6 @@
 # cookiejar
 
-**Local-only cookie bundles for coding agents.**
+**Local-only cookie bundles for coding agents. A CLI, nothing else.**
 
 You are already logged into GitHub, Linear, Notion, your admin panels. Your agent is not, and half of
 those things have no MCP server. cookiejar lets you pick the exact cookies you are willing to share,
@@ -17,10 +17,10 @@ agent (or anyone else) getting a copy of your whole browser.
              everything stays on 127.0.0.1
 ```
 
-- **Local only.** No account, no cloud, no telemetry. The server binds to `127.0.0.1` and the only
-  outbound requests it ever makes are the ones an agent explicitly proxies.
+- **Local only.** No account, no cloud, no telemetry. The agent daemon binds to `127.0.0.1` and the
+  only outbound requests it ever makes are the ones an agent explicitly proxies.
 - **Password protected.** Bundle definitions live in `~/.cookiejar/vault.json`, encrypted with
-  scrypt + AES-256-GCM. Agent tokens only work while the jar is unlocked.
+  scrypt + AES-256-GCM. Agent tokens only work while `cookiejar serve` is holding the jar open.
 - **Values are never stored.** A bundle records *which* cookies to use. The values are read live from
   the browser on every access, so re-logging in the browser is all it takes to refresh an agent, and a
   stolen vault file leaks nothing but bundle names.
@@ -33,7 +33,7 @@ Requires Node 22.5+ (for the built-in SQLite reader).
 
 ```bash
 npm install -g @puffle/cookiejar
-cookiejar ui --open
+cookiejar setup
 ```
 
 Or from source:
@@ -42,14 +42,45 @@ Or from source:
 git clone https://github.com/DevelopIQ-ai/cookiejar
 cd cookiejar
 npm install && npm run build
-node dist/cli.js ui --open
+node dist/cli.js setup
 ```
 
-Open http://127.0.0.1:4088, choose a master password, and pick your cookies.
+## Walkthrough
+
+`setup` asks which browsers you use (and explains Safari's Full Disk Access if you pick it), then
+creates the encrypted jar. Everything after that is a command; anything touching the jar asks for
+your master password, or reads `COOKIEJAR_PASSWORD` for scripts.
+
+```bash
+cookiejar doctor                                 # what can be read here, and why not
+cookiejar sites                                  # every site you have cookies for
+cookiejar cookies linear.app                     # names only — values are never printed
+
+cookiejar bundle new "linear agent"
+cookiejar bundle add linear-agent-9f0b73 linear.app --pick   # tick cookies, terminal style
+cookiejar bundle linear-agent-9f0b73             # selectors, live contents, tokens
+
+cookiejar token new linear-agent-9f0b73 --label devin --days 7 --proxy-only
+cookiejar share linear-agent-9f0b73              # MCP + curl config, local and cloud
+cookiejar token revoke linear-agent-9f0b73 1b027f6ab46c
+cookiejar activity                               # audit log
+```
+
+`cookiejar export --bundle <id>` and `cookiejar header --bundle <id>` read the jar directly, so a
+local script needs neither a daemon nor a token. Run `cookiejar help` for the full list.
 
 ## Using a bundle from an agent
 
-Issue a token in **Bundles → Agent access**, then give the agent one of these.
+Agents talk to `cookiejar serve`, a loopback daemon that answers bundle tokens and nothing else — it
+serves `/agent/*` only, so a token can never create or change a bundle. Start it and leave it
+running while an agent works; stopping it (or `--auto-lock`, 30 idle minutes by default) cuts every
+agent off at once.
+
+```bash
+cookiejar serve
+```
+
+Then give the agent one of these.
 
 **MCP (Devin, Claude Code, Cursor, Codex …)**
 
@@ -76,7 +107,7 @@ cookiejar export --format storage-state                # Playwright / Puppeteer
 cookiejar header --url-target https://linear.app/team  # a single Cookie header
 ```
 
-**HTTP** (the daemon, `Authorization: Bearer cjr_…`)
+**HTTP** (`cookiejar serve`, `Authorization: Bearer cjr_…`)
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -87,6 +118,19 @@ cookiejar header --url-target https://linear.app/team  # a single Cookie header
 
 `POST /agent/fetch` is the safest option: cookies never leave the machine, and the request is refused
 unless the target host is one the bundle actually holds cookies for.
+
+## Handing a bundle to an agent in the cloud
+
+The daemon listens on loopback, so a remote agent needs one of two things.
+
+1. **Tunnel it (recommended).** Issue a `--proxy-only` token, expose the daemon
+   (`cloudflared tunnel --url http://127.0.0.1:4088`, `tailscale funnel 4088`, `ngrok http 4088`),
+   and give the agent the tunnel URL plus the token — as MCP
+   (`npx -y @puffle/cookiejar mcp --url https://…`) or straight `POST /agent/fetch`. Values stay on
+   your machine; revoking the token or stopping the daemon cuts access instantly.
+   `cookiejar share <bundle> --tunnel <url>` prints the exact commands.
+2. **Export it.** `cookiejar export --format storage-state --out state.json` and upload that to the
+   agent. Simplest, but the cookie values leave your machine and go stale on your next re-login.
 
 ## Browser support
 
@@ -105,8 +149,8 @@ WAL) and never writes to them.
 ## Security model
 
 - The vault protects bundle *definitions*, not cookie values — values live in your browser only.
-- An agent token is worth exactly one bundle, only while the app is unlocked, and only until you hit
-  **Revoke** (or the jar auto-locks after 30 idle minutes).
+- An agent token is worth exactly one bundle, only while `cookiejar serve` is running, and only until
+  `cookiejar token revoke` (or the daemon auto-locks after 30 idle minutes).
 - Every access is appended to `~/.cookiejar/audit.log` with the bundle, token label, and what was
   asked for. Values are never logged.
 - Prefer *proxy only* tokens and per-site bundles. Cookies are bearer credentials: anything you put in
@@ -116,14 +160,14 @@ WAL) and never writes to them.
 ## Development
 
 ```bash
-npm run dev            # daemon with tsx
-npm --prefix ui run dev   # Vite UI on :4089, proxying the daemon
-npm test               # node:test, includes an end-to-end daemon test
+npm run dev -- doctor    # the CLI through tsx
+npm test                 # node:test; drives the real binary end to end
 npm run lint && npm run typecheck
-node scripts/seed-demo-profile.mjs /tmp/cookiejar-demo   # fake browser data for UI work
+HOME=/tmp/cookiejar-demo node scripts/seed-demo-profile.mjs /tmp/cookiejar-demo   # fake browser data
 ```
 
-Layout: `src/core` (crypto, vault, browser readers, bundle resolution), `src/server` (local HTTP API),
-`src/mcp` (stdio MCP server), `ui` (React app), `test`.
+Layout: `src/core` (crypto, vault, browser readers, bundle resolution, bundle/grant management),
+`src/cli` (commands and prompts), `src/server` (the agent daemon), `src/mcp` (stdio MCP server),
+`test`.
 
 MIT licensed. Issues and PRs welcome.

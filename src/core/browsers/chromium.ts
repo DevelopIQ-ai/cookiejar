@@ -226,6 +226,13 @@ export function readChromiumCookies(profile: BrowserProfile): SourcedCookie[] {
   const keyring = keyringFor(flavour);
 
   return withCookieDb(profile.path, (db) => {
+    // Some profile directories contain unrelated SQLite files or freshly-created
+    // cookie stores that haven't had the cookies table created yet.
+    const table = db.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cookies'`,
+    ).get();
+    if (!table) return [];
+
     const statement = db.prepare(
       `SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite
        FROM cookies ORDER BY host_key, name`,
