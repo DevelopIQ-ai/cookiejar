@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Nothing needs the vault edited by hand any more: `cookiejar bundle edit` renames a bundle or
+  changes its description, `cookiejar tokens [--live]` lists every token the jar handed out,
+  `cookiejar token revoke --all [<bundle>]` is a panic switch that cuts every live token off, and
+  `cookiejar activity --bundle <id>` filters the audit log.
+- `cookiejar setup --browsers chrome,firefox` answers the setup prompt from a script.
+- `cookiejar reset [--force]` deletes the jar when the master password is gone. Bundles go with it;
+  your cookies never lived there.
+
 ## 0.2.0
 
 - **cookiejar is a CLI.** The React app, the Vite build, and the whole `/api/*` surface are gone.

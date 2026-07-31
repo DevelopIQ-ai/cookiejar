@@ -108,3 +108,30 @@ test('the terminal can do the whole flow without the app', () => {
   run('bundle', 'rm', bundleId, '--force');
   assert.match(run('bundles'), /No bundles yet/);
 });
+
+test('nothing needs the vault edited by hand: rename, list every token, revoke the lot, start over', () => {
+  run('setup', '--browsers', 'chrome'); // the scripted answer, no prompt
+  assert.match(run('status'), /browsers {3}chrome$/m);
+
+  const bundleId = /created (\S+)/.exec(run('bundle', 'new', 'first name'))![1];
+  run('bundle', 'add', bundleId, 'example.com', '--names', 'session');
+  assert.match(run('bundle', 'edit', bundleId, '--name', 'better name', '--description', 'for devin'), /better name/);
+  assert.match(run('bundles'), /better name/);
+  assert.throws(() => run('bundle', 'edit', bundleId), /nothing to change/);
+
+  run('token', 'new', bundleId, '--label', 'one');
+  run('token', 'new', bundleId, '--label', 'two');
+  const tokens = run('tokens');
+  assert.match(tokens, /one/);
+  assert.match(tokens, /two/);
+  assert.doesNotMatch(tokens, /cjr_/, 'tokens are listed by id, never by value');
+
+  assert.match(run('token', 'revoke', '--all'), /revoked 2 tokens/);
+  assert.match(run('tokens', '--live'), /no live tokens/);
+  assert.match(run('activity', '--bundle', bundleId), /grant_revoked/);
+  assert.doesNotMatch(run('activity', '--bundle', 'no-such-bundle'), /grant_revoked/);
+
+  run('reset', '--force');
+  assert.equal(fs.existsSync(path.join(sandbox, '.cookiejar', 'vault.json')), false);
+  assert.match(run('bundles'), /No bundles yet/, 'a fresh jar comes back empty');
+});
