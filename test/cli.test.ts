@@ -135,3 +135,47 @@ test('nothing needs the vault edited by hand: rename, list every token, revoke t
   assert.equal(fs.existsSync(path.join(sandbox, '.cookiejar', 'vault.json')), false);
   assert.match(run('bundles'), /No bundles yet/, 'a fresh jar comes back empty');
 });
+
+test('suggest groups what you are signed into, and only writes when you accept', () => {
+  const chrome = path.join(sandbox, '.config', 'google-chrome', 'Default');
+  const db = new DatabaseSync(path.join(chrome, 'Cookies'));
+  const insert = db.prepare(`INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const expiry = (BigInt(Math.floor(Date.now() / 1000) + 86_400) + 11_644_473_600n) * 1_000_000n;
+  insert.run('.united.com', 'SESSION_ID', 'united-secret', new Uint8Array(0), '/', expiry, 1, 1, 1);
+  insert.run('.github.com', 'user_session', 'github-secret', new Uint8Array(0), '/', expiry, 1, 1, 1);
+  db.close();
+
+  const listed = run('suggest');
+  assert.match(listed, /travel/);
+  assert.match(listed, /united\.com/);
+  assert.doesNotMatch(listed, /united-secret/, 'suggestions print names, never values');
+  assert.match(run('bundles'), /No bundles yet/, 'listing suggestions writes nothing');
+
+  assert.match(run('suggest', 'travel', '--yes'), /created travel/);
+  const bundleId = /^(travel\S*)/m.exec(run('bundles'))![1];
+  assert.match(run('bundle', bundleId), /SESSION_ID/);
+  assert.throws(() => run('suggest', 'nonsense'), /no suggestion called nonsense/);
+
+  run('bundle', 'rm', bundleId, '--force');
+});
+
+test('skill drops a SKILL.md an agent can pick up, and will not clobber it', () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'cookiejar-skill-'));
+  const target = path.join(project, '.agents', 'skills', 'cookiejar', 'SKILL.md');
+  run('skill', '--dir', path.dirname(target));
+
+  const body = fs.readFileSync(target, 'utf8');
+  assert.match(body, /^---\nname: cookiejar\n/, 'it is a real skill file');
+  assert.match(body, /COOKIEJAR_TOKEN/);
+  assert.match(body, /agent\/fetch/);
+
+  assert.throws(() => run('skill', '--dir', path.dirname(target)), /already exists/);
+  fs.writeFileSync(target, 'mine');
+  assert.throws(() => run('skill', '--dir', path.dirname(target)), /already exists/);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'mine', 'an edited skill is left alone');
+  run('skill', '--dir', path.dirname(target), '--force');
+  assert.notEqual(fs.readFileSync(target, 'utf8'), 'mine');
+
+  assert.match(run('skill', '--print'), /Using a cookiejar bundle/);
+  fs.rmSync(project, { recursive: true, force: true });
+});

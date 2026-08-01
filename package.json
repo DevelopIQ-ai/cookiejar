@@ -35,7 +35,7 @@
     "cli"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "dev": "node --import tsx src/cli.ts",
     "start": "node dist/cli.js serve",
     "typecheck": "tsc -p tsconfig.json --noEmit",
