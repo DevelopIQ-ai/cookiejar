@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-08-01
 
 - No more password prompts. A new jar keeps its key in the OS keyring (macOS Keychain, libsecret on
   Linux, a 0600 file where neither exists), so ordinary commands just open it. The vault file is
