@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - `cookiejar suggest` groups the sites you are signed into into bundles worth making — travel,
   work, developer infrastructure, finance, shopping, social, AI tools. It takes the cookies that
