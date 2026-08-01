@@ -3,6 +3,13 @@ name: npm-publish
 on:
   release:
     types: [published]
+  # So the token can be checked without burning a version number.
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Pack and authenticate, but do not publish'
+        type: boolean
+        default: true
 
 jobs:
   publish:
@@ -18,6 +25,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm publish
+      - name: Check the release token
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::the NPM_TOKEN repository secret is not set, so a release cannot publish"
+            exit 1
+          fi
+          echo "publishing as $(npm whoami)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish ${{ inputs.dryRun && '--dry-run' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
