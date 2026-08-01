@@ -101,10 +101,11 @@ cookiejar lend work-3f9a --minutes 60
 ```
 
 That serves the bundle, opens a tunnel, mints a short proxy-only token, and
-prints one `cjr1.…` string. Give that string to the other agent and nothing
-else. Ctrl-C revokes it. Keep `--minutes` as small as the task allows, and do
-not pass `--values` unless the human explicitly wants the other side to read
-raw cookies.
+copies the complete `npx -y @puffle/cookiejar connect 'cjr1.…'` command to the
+human's clipboard. They can paste it directly into the other agent. Ctrl-C
+revokes it. Keep `--minutes` as small as the task allows, and do not pass
+`--values` unless the human explicitly wants the other side to read raw
+cookies. Use `--no-copy` in a headless shell.
 
 While it runs:
 
