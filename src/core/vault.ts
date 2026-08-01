@@ -3,11 +3,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { ensureConfigDir, vaultPath } from './paths.js';
 import { deriveKey, newSalt, open, openWithKey, seal, type SealedBox } from './crypto.js';
+import { keyring, newVaultSecret } from './keyring.js';
 import type { Bundle, VaultData } from './types.js';
+
+/** Who holds the key: the OS keyring, or a passphrase in your head. */
+export type Protection = 'keyring' | 'password';
 
 interface VaultFile {
   format: 'cookiejar-vault';
   createdAt: string;
+  /** Absent on jars made before keyring support, which were all password-locked. */
+  protection?: Protection;
   box: SealedBox;
 }
 
@@ -25,6 +31,13 @@ export class BadPasswordError extends Error {
   }
 }
 
+/** The jar is keyring-backed but the key is gone, so nothing can open it. */
+export class MissingKeyError extends Error {
+  constructor(where: string) {
+    super(`the vault key is no longer in ${where}`);
+  }
+}
+
 /**
  * The encrypted store of bundle definitions and grants. Cookie *values* are
  * never kept here: they are read live from the browsers on each access, so a
@@ -33,6 +46,7 @@ export class BadPasswordError extends Error {
 export class Vault {
   private key: Buffer | null = null;
   private salt: Buffer | null = null;
+  private mode: Protection = 'password';
   private data: VaultData | null = null;
   /** Identity of the file our decrypted copy came from, so we can tell when someone else wrote it. */
   private stamp: string | null = null;
@@ -45,12 +59,76 @@ export class Vault {
     return this.key !== null;
   }
 
+  /** How the jar on disk is protected; a jar that does not exist yet is keyring-backed. */
+  get protection(): Protection {
+    if (!this.exists) return 'keyring';
+    return this.file().protection ?? 'password';
+  }
+
   create(password: string): void {
     if (this.exists) throw new Error('vault already exists');
     this.salt = newSalt();
     this.key = deriveKey(password, this.salt);
     this.data = structuredClone(EMPTY);
+    this.mode = 'password';
     this.persist();
+  }
+
+  /**
+   * Makes a jar whose key lives in the OS keyring, so ordinary use never asks
+   * for anything. The file stays encrypted: the key is 32 random bytes held by
+   * the keychain rather than something derived from a passphrase.
+   */
+  createManaged(): void {
+    if (this.exists) throw new Error('vault already exists');
+    const secret = newVaultSecret();
+    keyring().set(secret);
+    this.key = Buffer.from(secret, 'base64');
+    this.salt = newSalt();
+    this.data = structuredClone(EMPTY);
+    this.mode = 'keyring';
+    this.persist();
+  }
+
+  /** Opens a keyring-backed jar with no prompt. */
+  unlockFromKeyring(): void {
+    const store = keyring();
+    const secret = store.get();
+    if (!secret) throw new MissingKeyError(store.where);
+    const file = this.file();
+    const key = Buffer.from(secret, 'base64');
+    try {
+      this.data = JSON.parse(openWithKey(file.box, key)) as VaultData;
+    } catch {
+      throw new MissingKeyError(store.where);
+    }
+    this.key = key;
+    this.salt = Buffer.from(file.box.salt, 'base64');
+    this.mode = 'keyring';
+    this.stamp = this.diskStamp();
+  }
+
+  /** Hands the key to the OS keyring and stops asking for a password. */
+  adoptKeyring(): void {
+    const data = this.read();
+    const secret = newVaultSecret();
+    keyring().set(secret);
+    this.key = Buffer.from(secret, 'base64');
+    this.salt = newSalt();
+    this.data = data;
+    this.mode = 'keyring';
+    this.persist();
+  }
+
+  /** Goes back to a passphrase, and takes the key out of the keyring. */
+  adoptPassword(password: string): void {
+    const data = this.read();
+    this.salt = newSalt();
+    this.key = deriveKey(password, this.salt);
+    this.data = data;
+    this.mode = 'password';
+    this.persist();
+    keyring().clear();
   }
 
   unlock(password: string): void {
@@ -64,6 +142,7 @@ export class Vault {
     this.data = JSON.parse(opened.plaintext) as VaultData;
     this.key = opened.key;
     this.salt = opened.salt;
+    this.mode = 'password';
     this.stamp = this.diskStamp();
   }
 
@@ -101,11 +180,11 @@ export class Vault {
 
   changePassword(current: string, next: string): void {
     this.unlock(current);
-    const data = this.read();
-    this.salt = newSalt();
-    this.key = deriveKey(next, this.salt);
-    this.data = data;
-    this.persist();
+    this.adoptPassword(next);
+  }
+
+  private file(): VaultFile {
+    return JSON.parse(fs.readFileSync(vaultPath(), 'utf8')) as VaultFile;
   }
 
   private diskStamp(): string | null {
@@ -122,7 +201,7 @@ export class Vault {
     if (!this.key) return;
     const stamp = this.diskStamp();
     if (stamp === null || stamp === this.stamp) return;
-    const file = JSON.parse(fs.readFileSync(vaultPath(), 'utf8')) as VaultFile;
+    const file = this.file();
     try {
       this.data = JSON.parse(openWithKey(file.box, this.key)) as VaultData;
     } catch {
@@ -140,6 +219,7 @@ export class Vault {
     const file: VaultFile = {
       format: 'cookiejar-vault',
       createdAt: new Date().toISOString(),
+      protection: this.mode,
       box: seal(JSON.stringify(this.data), this.key, this.salt),
     };
     const target = vaultPath();

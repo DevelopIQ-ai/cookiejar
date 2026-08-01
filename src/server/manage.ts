@@ -291,6 +291,29 @@ export async function handleManageApi(
     }
   }
 
+  // Every token the jar handed out, in one place: per-bundle lists hide the
+  // one you forgot about, which is the one that matters.
+  if (route === '/api/tokens') {
+    const now = Date.now() / 1000;
+    sendJson(res, 200, {
+      tokens: vault.read().bundles.flatMap((bundle) =>
+        bundle.grants.map((grant) => ({
+          id: grantId(grant),
+          bundleId: bundle.id,
+          bundleName: bundle.name,
+          label: grant.label,
+          createdAt: grant.createdAt,
+          expiresAt: grant.expiresAt,
+          lastUsedAt: grant.lastUsedAt,
+          useCount: grant.useCount,
+          proxyOnly: grant.redactValues,
+          state: grant.revokedAt ? 'revoked' : grant.expiresAt && grant.expiresAt < now ? 'expired' : 'live',
+        })),
+      ),
+    });
+    return true;
+  }
+
   if (route === '/api/activity') {
     sendJson(res, 200, { entries: readAudit(200) });
     return true;

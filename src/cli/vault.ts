@@ -1,6 +1,7 @@
 import { audit } from '../core/audit.js';
 import { vaultPath } from '../core/paths.js';
-import { BadPasswordError, Vault } from '../core/vault.js';
+import { keyring } from '../core/keyring.js';
+import { BadPasswordError, MissingKeyError, Vault } from '../core/vault.js';
 import { askSecret } from './prompt.js';
 
 export class CliError extends Error {}
@@ -14,18 +15,44 @@ const scriptedSecret = (): string | undefined => process.env.COOKIEJAR_PASSWORD;
  */
 export async function openVault(): Promise<Vault> {
   const vault = new Vault();
+  const scripted = scriptedSecret();
+
   if (!vault.exists) {
-    vault.create(await newPassword('No jar yet. Pick a master password (8+ characters): '));
+    // No password by default: the key goes to the OS keyring and stays there.
+    if (scripted) {
+      vault.create(scripted);
+    } else {
+      vault.createManaged();
+      console.log(`created ${vaultPath()} — the key is in ${keyring().where}, so there is nothing to remember`);
+      audit({ event: 'unlock', detail: 'vault created' });
+      return vault;
+    }
     audit({ event: 'unlock', detail: 'vault created' });
     console.log(`created ${vaultPath()}`);
     return vault;
   }
 
-  const scripted = scriptedSecret();
+  if (vault.protection === 'keyring') {
+    try {
+      vault.unlockFromKeyring();
+      audit({ event: 'unlock' });
+      return vault;
+    } catch (error) {
+      audit({ event: 'unlock_failed' });
+      if (error instanceof MissingKeyError) {
+        throw new CliError(
+          `${error.message}. Without it the jar cannot be opened — cookiejar reset --force starts a new one.`,
+        );
+      }
+      throw error;
+    }
+  }
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       vault.unlock(scripted ?? (await askSecret('Master password: ')));
       audit({ event: 'unlock' });
+      if (!scripted) console.log('(cookiejar passwd --none moves the key to your keyring and stops this prompt)');
       return vault;
     } catch (error) {
       audit({ event: 'unlock_failed' });

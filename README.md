@@ -38,7 +38,7 @@ npm install && npm run build
 node dist/cli.js setup
 ```
 
-`setup` asks which browsers you use and explains Safari's Full Disk Access if you pick it. After that, anything that touches the jar asks for your master password, or reads `COOKIEJAR_PASSWORD` for scripts. `cookiejar reset` throws the jar away if you forget the password.
+`setup` asks which browsers you use and explains Safari's Full Disk Access if you pick it. The jar's key lives in your OS keyring (macOS Keychain, libsecret on Linux), so nothing asks you for a password in normal use — the file on disk is still encrypted. `cookiejar passwd` puts a master password on it if you want one, and `cookiejar passwd --none` moves the key back to the keyring.
 
 ## A whole minute
 
@@ -88,10 +88,11 @@ auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 | **Suggested bundles** | `cookiejar suggest` reads what you are signed into and proposes bundles worth making — travel, work, finance, dev, shopping, social, AI — taking the cookies that look like a session and skipping analytics-only sites. Nothing is written until you accept. |
 | **An optional UI** | `cookiejar ui` opens the same jar in a browser on 127.0.0.1: sites, cookie names, bundles, tokens, suggestions. Everything it can do, the terminal can do. It never shows a cookie value either. |
 | **A skill for your agent** | `cookiejar skill` writes `.agents/skills/cookiejar/SKILL.md` into your project, so a coding agent knows how to use a token, and what it must never do with one. |
-| **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. Revoke it, or revoke every live token at once. |
+| **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. `cookiejar tokens` (or the Tokens tab) shows every one you ever handed out; revoke one, or revoke every live token at once. |
+| **One-command lending** | `cookiejar lend <bundle> --minutes 60` serves the bundle, tunnels it over HTTPS, mints a short proxy-only token, and prints a single string for a cloud agent. Ctrl-C revokes it. |
 | **Proxy-only mode** | The agent can make authenticated requests through `POST /agent/fetch` but never sees a cookie value. |
 | **MCP, CLI, and HTTP agents** | Tools for `describe_bundle`, `get_cookie_header`, `export_cookies`, `http_request`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
-| **Cuts access instantly** | Stop the daemon, revoke a token, change the master password, or let it auto-lock after 30 idle minutes — every agent loses access on its next request, no restart needed. |
+| **Cuts access instantly** | Stop the daemon, revoke a token, lock the jar, or let it auto-lock after 30 idle minutes — every agent loses access on its next request, no restart needed. |
 
 ## Use it with real cookies
 
@@ -186,18 +187,58 @@ cookiejar header --url-target https://linear.app/team  # a single Cookie header
 
 ## Handing a bundle to an agent in the cloud
 
-The daemon listens on loopback, so a remote agent needs one of two things.
+The daemon listens on loopback, so an agent on someone else's machine cannot
+reach it. `cookiejar lend` does the whole handover in one command:
 
-1. **Tunnel it (recommended).** Expose `127.0.0.1:4088` with `cloudflared tunnel`, `tailscale funnel`, or `ngrok`, then issue a `--proxy-only` token and give the agent the tunnel URL.
+```console
+$ cookiejar lend work-3f9a --minutes 60
 
-   ```bash
-   cookiejar token new linear-agent-1d247f --label cloud-devin --days 1 --proxy-only
-   cookiejar share linear-agent-1d247f --tunnel https://your-tunnel.trycloudflare.com
-   ```
+work is lent for 60 minutes, proxy only. Give the agent this:
 
-   Values stay on your machine; revoking the token or stopping the daemon cuts access instantly.
+  cjr1.eyJ1IjoiaHR0cHM6Ly9mcm9zdC1wYW5kYS05eDIudHJ5Y2xvdWRmbGFyZS5jb20i…
 
-2. **Export it.** `cookiejar export --format storage-state --out state.json` and upload that to the agent. Simplest, but the cookie values leave your machine and go stale on the next re-login.
+It runs: cookiejar connect <that string>
+The agent can make requests as you, but never sees a cookie value.
+Ctrl-C revokes it now. Otherwise it dies on its own in 60 minutes.
+```
+
+That serves the bundle, starts a Cloudflare quick tunnel (fetching a pinned,
+checksum-verified `cloudflared` once if you do not have it), and mints a
+proxy-only token that expires. The agent runs:
+
+```console
+$ cookiejar connect cjr1.…
+connected to "work" · about 60 minutes left
+hosts   github.com, linear.app
+cookies 7, values hidden (proxy only)
+
+$ cookiejar fetch https://linear.app/api/me
+```
+
+The connect string is the only thing you send, and it is a credential: it
+carries a bearer token. Ctrl-C on the lending terminal revokes the token and
+takes the address down; so does `cookiejar token revoke --all`.
+
+Pass `--local` to skip the tunnel (an agent on this machine), or `--values` if
+the agent genuinely needs the raw cookies instead of proxied requests.
+
+The blunt alternative is still there: `cookiejar export --format storage-state
+--out state.json` and upload it — simplest, but the cookie values leave your
+machine and go stale on the next re-login.
+
+### Letting an agent look after the bundle
+
+An agent running on *your* machine can keep a bundle tidy for you:
+
+```bash
+cookiejar mcp --manage
+```
+
+On top of the usual bundle tools that adds `list_sites`, `list_cookies`,
+`suggest_bundles`, `create_bundle`, `add_site`, `remove_site`, `rename_bundle`,
+`show_bundle`, `list_tokens`, `issue_token` and `revoke_token`, so "add my
+Figma login to the work bundle and lend it to the cloud for an hour" is one
+sentence. None of those tools return a cookie value.
 
 ## Prompt for coding agents
 

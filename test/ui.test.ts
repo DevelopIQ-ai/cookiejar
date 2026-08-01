@@ -102,6 +102,25 @@ test('a token issued in the UI is shown once and never listed again', async () =
   assert.ok(revoked.bundle.grants[0].revokedAt, 'revoking from the UI sticks');
 });
 
+test('every token the jar handed out is listed in one place', async () => {
+  const bundles = (await (await ui('/api/bundles')).json()) as { bundles: { id: string }[] };
+  const id = bundles.bundles[0].id;
+  await ui(`/api/bundles/${id}/grants`, { method: 'POST', body: JSON.stringify({ label: 'a cloud agent', redactValues: true }) });
+
+  const { tokens } = (await (await ui('/api/tokens')).json()) as {
+    tokens: { id: string; bundleName: string; label: string; state: string; proxyOnly: boolean }[];
+  };
+  const listed = tokens.find((token) => token.label === 'a cloud agent')!;
+  assert.equal(listed.state, 'live');
+  assert.equal(listed.proxyOnly, true);
+  assert.ok(listed.bundleName, 'the bundle is named, so the list reads without cross-referencing');
+  assert.ok(!JSON.stringify(tokens).includes('cjr_'), 'no token value is ever listed');
+
+  await ui(`/api/bundles/${id}/grants/${listed.id}`, { method: 'DELETE' });
+  const after = (await (await ui('/api/tokens')).json()) as { tokens: { id: string; state: string }[] };
+  assert.equal(after.tokens.find((token) => token.id === listed.id)!.state, 'revoked');
+});
+
 test('another page on this machine cannot drive the UI API', async () => {
   const response = await ui('/api/bundles', {
     method: 'POST',
