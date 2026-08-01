@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cookiejar</title>
+    <style>
+      :root {
+        --ink: #171512;
+        --muted: #6f6862;
+        --line: #e3ddd3;
+        --paper: #faf7f2;
+        --card: #fffdf9;
+        --accent: #b4531f;
+        --accent-soft: #fdf0e6;
+        --good: #2f6f4f;
+        --bad: #a03232;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+      header {
+        display: flex; align-items: center; gap: 16px;
+        padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--card);
+        position: sticky; top: 0; z-index: 5;
+      }
+      header h1 { font-size: 17px; margin: 0; letter-spacing: -0.02em; }
+      nav { display: flex; gap: 4px; margin-left: 12px; }
+      nav button {
+        border: 0; background: none; color: var(--muted); padding: 6px 12px;
+        border-radius: 999px; cursor: pointer; font: inherit;
+      }
+      nav button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+      .spacer { flex: 1; }
+      main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+      h2 { font-size: 15px; margin: 0 0 4px; }
+      .sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+      .card {
+        background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+        padding: 16px; margin-bottom: 12px;
+      }
+      .row { display: flex; align-items: center; gap: 10px; }
+      .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+      button.btn {
+        border: 1px solid var(--line); background: var(--card); color: var(--ink);
+        padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px;
+      }
+      button.btn:hover { border-color: var(--accent); color: var(--accent); }
+      button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.btn.primary:hover { color: #fff; opacity: 0.92; }
+      button.btn.danger:hover { border-color: var(--bad); color: var(--bad); }
+      input, select {
+        border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px;
+        font: inherit; font-size: 13px; background: #fff; color: var(--ink);
+      }
+      input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+      ul.list { list-style: none; margin: 0; padding: 0; max-height: 62vh; overflow: auto; }
+      ul.list li { border-bottom: 1px solid var(--line); }
+      ul.list li:last-child { border-bottom: 0; }
+      ul.list button {
+        width: 100%; text-align: left; border: 0; background: none; cursor: pointer;
+        font: inherit; padding: 9px 12px; display: flex; gap: 8px; align-items: baseline;
+      }
+      ul.list button:hover { background: var(--paper); }
+      ul.list button[aria-current="true"] { background: var(--accent-soft); }
+      .count { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 6px 8px; }
+      td { padding: 6px 8px; border-top: 1px solid var(--line); font-size: 13px; }
+      .tag {
+        display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+        background: var(--paper); border: 1px solid var(--line); color: var(--muted);
+      }
+      .tag.live { color: var(--good); border-color: #cbe3d5; background: #f1f8f3; }
+      .tag.dead { color: var(--bad); border-color: #ebd0d0; background: #fdf3f3; }
+      .empty { color: var(--muted); padding: 24px 8px; text-align: center; font-size: 13px; }
+      dialog {
+        border: 1px solid var(--line); border-radius: 12px; padding: 20px; max-width: 560px; width: 92%;
+        background: var(--card); color: var(--ink);
+      }
+      dialog::backdrop { background: rgba(23, 21, 18, 0.35); }
+      pre.token {
+        background: var(--ink); color: #f7f2ea; padding: 12px; border-radius: 8px;
+        white-space: pre-wrap; word-break: break-all; margin: 8px 0;
+      }
+      .note { font-size: 12px; color: var(--muted); }
+      .toast {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: var(--ink); color: #f7f2ea; padding: 9px 16px; border-radius: 999px;
+        font-size: 13px; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+      }
+      .toast.show { opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>cookiejar</h1>
+      <nav id="nav"></nav>
+      <span class="spacer"></span>
+      <span class="note" id="scope"></span>
+      <button class="btn danger" id="lock">Lock the jar</button>
+    </header>
+    <main id="view"></main>
+    <div class="toast" id="toast"></div>
+
+    <script>
+      // Values never reach this page: the API sends cookie names and metadata
+      // only. Everything here is a view of the same vault the CLI edits.
+      const el = (tag, attrs = {}, kids = []) => {
+        const node = document.createElement(tag);
+        for (const [key, value] of Object.entries(attrs)) {
+          if (key === 'class') node.className = value;
+          else if (key === 'text') node.textContent = value;
+          else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+          else if (value !== null && value !== undefined && value !== false) node.setAttribute(key, value);
+        }
+        for (const kid of [].concat(kids)) if (kid) node.append(kid);
+        return node;
+      };
+
+      const state = { tab: 'cookies', all: false, site: null, bundleId: null, data: {} };
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: options.body ? { 'content-type': 'application/json' } : undefined,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `${response.status} ${path}`);
+        return body;
+      }
+
+      let toastTimer;
+      function toast(message) {
+        const node = document.getElementById('toast');
+        node.textContent = message;
+        node.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => node.classList.remove('show'), 2400);
+      }
+
+      const TABS = [
+        ['cookies', 'Cookies'],
+        ['suggested', 'Suggested bundles'],
+        ['bundles', 'Bundles'],
+        ['activity', 'Activity'],
+      ];
+
+      function renderNav() {
+        const nav = document.getElementById('nav');
+        nav.replaceChildren(
+          ...TABS.map(([id, label]) =>
+            el('button', {
+              text: label,
+              'aria-current': String(state.tab === id),
+              onclick: () => {
+                state.tab = id;
+                render();
+              },
+            }),
+          ),
+        );
+      }
+
+      const scopeLine = () => {
+        const s = state.data.state;
+        if (!s) return '';
+        const profiles = s.profiles.length;
+        const cookies = s.profiles.reduce((sum, p) => sum + p.cookieCount, 0);
+        return `${cookies} cookies · ${profiles} profile${profiles === 1 ? '' : 's'}`;
+      };
+
+      function allToggle() {
+        return el('label', { class: 'row note' }, [
+          el('input', {
+            type: 'checkbox',
+            ...(state.all ? { checked: 'checked' } : {}),
+            onchange: (event) => {
+              state.all = event.target.checked;
+              render();
+            },
+          }),
+          el('span', { text: 'include browsers I did not pick in setup' }),
+        ]);
+      }
+
+      // ── Cookies ────────────────────────────────────────────────────────────
+      async function viewCookies(view) {
+        const { sites } = await api(`/api/sites?all=${state.all ? 1 : 0}`);
+        if (!state.site && sites.length) state.site = sites[0].site;
+
+        const list = el('ul', { class: 'list' },
+          sites.map((site) =>
+            el('li', {}, [
+              el('button', {
+                'aria-current': String(site.site === state.site),
+                onclick: () => {
+                  state.site = site.site;
+                  render();
+                },
+              }, [
+                el('span', { class: 'mono', text: site.site }),
+                el('span', { class: 'count', text: `${site.cookieCount}` }),
+              ]),
+            ]),
+          ),
+        );
+
+        const detail = el('div', { class: 'card' }, [el('div', { class: 'empty', text: 'loading…' })]);
+        view.replaceChildren(
+          el('h2', { text: 'Cookies you have' }),
+          el('p', { class: 'sub', text: 'Everything cookiejar can read right now. Names and flags only — values never leave your machine, not even to this page.' }),
+          allToggle(),
+          el('div', { class: 'grid' }, [
+            el('div', { class: 'card', style: 'padding:0' }, [sites.length ? list : el('div', { class: 'empty', text: 'No cookies found.' })]),
+            detail,
+          ]),
+        );
+
+        if (!state.site) {
+          detail.replaceChildren(el('div', { class: 'empty', text: 'Sign in somewhere in your browser, then reload.' }));
+          return;
+        }
+
+        const { cookies } = await api(`/api/cookies?site=${encodeURIComponent(state.site)}&all=${state.all ? 1 : 0}`);
+        const checked = new Set();
+        const rows = cookies.map((cookie) =>
+          el('tr', {}, [
+            el('td', {}, [
+              el('input', {
+                type: 'checkbox',
+                onchange: (event) => (event.target.checked ? checked.add(cookie.name) : checked.delete(cookie.name)),
+              }),
+            ]),
+            el('td', { class: 'mono', text: cookie.name }),
+            el('td', { class: 'mono', text: cookie.domain }),
+            el('td', { class: 'mono', text: cookie.profileId }),
+            el('td', {}, [
+              el('span', { class: 'tag', text: `${cookie.valueLength} chars` }),
+              cookie.httpOnly ? el('span', { class: 'tag', text: 'httpOnly' }) : null,
+              cookie.expires && cookie.expires * 1000 < Date.now() ? el('span', { class: 'tag dead', text: 'expired' }) : null,
+            ]),
+          ]),
+        );
+
+        detail.replaceChildren(
+          el('div', { class: 'row' }, [
+            el('h2', { class: 'mono', text: state.site }),
+            el('span', { class: 'spacer' }),
+            el('button', {
+              class: 'btn primary',
+              text: 'Add to a bundle',
+              onclick: () => addToBundle(state.site, [...checked], cookies),
+            }),
+          ]),
+          el('p', { class: 'sub', text: 'Tick the cookies an agent needs. Nothing ticked means the whole site.' }),
+          el('table', {}, [
+            el('thead', {}, [el('tr', {}, ['', 'name', 'domain', 'profile', ''].map((label) => el('th', { text: label })))]),
+            el('tbody', {}, rows),
+          ]),
+        );
+      }
+
+      async function addToBundle(site, names, cookies) {
+        const { bundles } = await api('/api/bundles');
+        const profiles = [...new Set(cookies.map((cookie) => cookie.profileId))];
+        const dialog = el('dialog');
+        const bundleSelect = el('select', {}, [
+          el('option', { value: '', text: '＋ new bundle' }),
+          ...bundles.map((bundle) => el('option', { value: bundle.id, text: bundle.name })),
+        ]);
+        const nameInput = el('input', { placeholder: 'bundle name', value: site.split('.')[0] });
+        const profileSelect = el('select', {}, profiles.map((id) => el('option', { value: id, text: id })));
+
+        dialog.append(
+          el('h2', { text: `Add ${site}` }),
+          el('p', { class: 'sub', text: names.length ? `${names.length} cookie${names.length === 1 ? '' : 's'} selected.` : 'Every cookie on this site, so the bundle survives a cookie rename.' }),
+          el('div', { class: 'row', style: 'margin-bottom:10px' }, [el('span', { class: 'note', text: 'bundle' }), bundleSelect, nameInput]),
+          el('div', { class: 'row', style: 'margin-bottom:16px' }, [el('span', { class: 'note', text: 'profile' }), profileSelect]),
+          el('div', { class: 'row' }, [
+            el('span', { class: 'spacer' }),
+            el('button', { class: 'btn', text: 'Cancel', onclick: () => dialog.close() }),
+            el('button', {
+              class: 'btn primary',
+              text: 'Add',
+              onclick: async () => {
+                try {
+                  let bundleId = bundleSelect.value;
+                  if (!bundleId) {
+                    const created = await api('/api/bundles', { method: 'POST', body: JSON.stringify({ name: nameInput.value }) });
+                    bundleId = created.bundle.id;
+                  }
+                  await api(`/api/bundles/${encodeURIComponent(bundleId)}/selectors`, {
+                    method: 'POST',
+                    body: JSON.stringify({ profileId: profileSelect.value, domain: site, names }),
+                  });
+                  dialog.close();
+                  toast(`added ${site}`);
+                  state.tab = 'bundles';
+                  state.bundleId = bundleId;
+                  render();
+                } catch (error) {
+                  toast(error.message);
+                }
+              },
+            }),
+          ]),
+        );
+        const sync = () => (nameInput.style.display = bundleSelect.value ? 'none' : '');
+        bundleSelect.addEventListener('change', sync);
+        sync();
+        document.body.append(dialog);
+        dialog.addEventListener('close', () => dialog.remove());
+        dialog.showModal();
+      }
+
+      // ── Suggested bundles ──────────────────────────────────────────────────
+      async function viewSuggested(view) {
+        const { suggestions } = await api(`/api/suggestions?all=${state.all ? 1 : 0}`);
+        view.replaceChildren(
+          el('h2', { text: 'Suggested bundles' }),
+          el('p', { class: 'sub', text: 'Grouped from the sites you are actually signed into. Each one takes the cookies that look like a session, so an agent gets a working login and nothing else.' }),
+          allToggle(),
+          ...(suggestions.length
+            ? suggestions.map((suggestion) =>
+                el('div', { class: 'card' }, [
+                  el('div', { class: 'row' }, [
+                    el('h2', { text: suggestion.name }),
+                    el('span', { class: 'count', text: `${suggestion.sites.length} site${suggestion.sites.length === 1 ? '' : 's'}` }),
+                    el('span', { class: 'spacer' }),
+                    el('button', {
+                      class: 'btn primary',
+                      text: 'Create this bundle',
+                      onclick: async () => {
+                        try {
+                          const { bundle } = await api('/api/suggestions/accept', {
+                            method: 'POST',
+                            body: JSON.stringify({ categoryId: suggestion.categoryId }),
+                          });
+                          toast(`created ${bundle.id}`);
+                          state.tab = 'bundles';
+                          state.bundleId = bundle.id;
+                          render();
+                        } catch (error) {
+                          toast(error.message);
+                        }
+                      },
+                    }),
+                  ]),
+                  el('p', { class: 'sub', text: suggestion.description }),
+                  el('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px' },
+                    suggestion.sites.map((site) => el('span', { class: 'tag mono', text: `${site.site} · ${site.authNames.length}` })),
+                  ),
+                ]),
+              )
+            : [el('div', { class: 'card' }, [el('div', { class: 'empty', text: 'Nothing to suggest yet. Sign in to a few sites in your browser and reload.' })])]),
+        );
+      }
+
+      // ── Bundles ────────────────────────────────────────────────────────────
+      async function viewBundles(view) {
+        const { bundles } = await api('/api/bundles');
+        if (!state.bundleId && bundles.length) state.bundleId = bundles[0].id;
+
+        const list = el('ul', { class: 'list' },
+          bundles.map((bundle) =>
+            el('li', {}, [
+              el('button', {
+                'aria-current': String(bundle.id === state.bundleId),
+                onclick: () => {
+                  state.bundleId = bundle.id;
+                  render();
+                },
+              }, [
+                el('span', { text: bundle.name }),
+                el('span', { class: 'count', text: `${bundle.selectors.length} site${bundle.selectors.length === 1 ? '' : 's'}` }),
+              ]),
+            ]),
+          ),
+        );
+
+        const detail = el('div', { class: 'card' }, [el('div', { class: 'empty', text: 'loading…' })]);
+        view.replaceChildren(
+          el('h2', { text: 'Bundles' }),
+          el('p', { class: 'sub', text: 'A bundle stores which cookies an agent may use, never the values. Re-logging in your browser refreshes every agent.' }),
+          el('div', { class: 'grid' }, [
+            el('div', { class: 'card', style: 'padding:0' }, [bundles.length ? list : el('div', { class: 'empty', text: 'No bundles yet.' })]),
+            detail,
+          ]),
+        );
+
+        if (!state.bundleId) {
+          detail.replaceChildren(el('div', { class: 'empty', text: 'Make one from the Cookies or Suggested tab.' }));
+          return;
+        }
+
+        const data = await api(`/api/bundles/${encodeURIComponent(state.bundleId)}`);
+        const bundle = data.bundle;
+        detail.replaceChildren(
+          el('div', { class: 'row' }, [
+            el('h2', { text: bundle.name }),
+            el('span', { class: 'count mono', text: bundle.id }),
+            el('span', { class: 'spacer' }),
+            el('button', { class: 'btn primary', text: 'Issue a token', onclick: () => issueToken(bundle) }),
+            el('button', {
+              class: 'btn danger',
+              text: 'Delete',
+              onclick: async () => {
+                if (!confirm(`Delete "${bundle.name}" and its tokens?`)) return;
+                await api(`/api/bundles/${encodeURIComponent(bundle.id)}`, { method: 'DELETE' });
+                state.bundleId = null;
+                toast('deleted');
+                render();
+              },
+            }),
+          ]),
+          el('p', { class: 'sub', text: bundle.description || 'No description.' }),
+
+          el('h2', { text: 'Sites' }),
+          el('table', {}, [
+            el('tbody', {}, bundle.selectors.map((selector) =>
+              el('tr', {}, [
+                el('td', { class: 'mono', text: selector.domain }),
+                el('td', { class: 'mono', text: selector.profileId }),
+                el('td', { class: 'mono', text: selector.names.length ? selector.names.join(', ') : 'every cookie' }),
+                el('td', {}, [
+                  el('button', {
+                    class: 'btn danger',
+                    text: 'Remove',
+                    onclick: async () => {
+                      await api(`/api/bundles/${encodeURIComponent(bundle.id)}/selectors?domain=${encodeURIComponent(selector.domain)}&profileId=${encodeURIComponent(selector.profileId)}`, { method: 'DELETE' });
+                      toast(`removed ${selector.domain}`);
+                      render();
+                    },
+                  }),
+                ]),
+              ]),
+            )),
+          ]),
+
+          el('h2', { style: 'margin-top:16px', text: `Live contents · ${data.cookies.length} cookie${data.cookies.length === 1 ? '' : 's'}` }),
+          data.cookies.length
+            ? el('table', {}, [
+                el('tbody', {}, data.cookies.map((cookie) =>
+                  el('tr', {}, [
+                    el('td', { class: 'mono', text: cookie.name }),
+                    el('td', { class: 'mono', text: cookie.domain }),
+                    el('td', { class: 'mono', text: cookie.profileId }),
+                  ]),
+                )),
+              ])
+            : el('p', { class: 'sub', text: 'Nothing right now — the selectors match no live cookie. Signing in again fixes this.' }),
+          ...data.emptySelectors.map((selector) => el('p', { class: 'sub', text: `! ${selector.domain} matches nothing right now` })),
+
+          el('h2', { style: 'margin-top:16px', text: 'Tokens' }),
+          bundle.grants.length
+            ? el('table', {}, [
+                el('thead', {}, [el('tr', {}, ['id', 'label', 'state', 'used', ''].map((label) => el('th', { text: label })))]),
+                el('tbody', {}, bundle.grants.map((grant) => {
+                  const dead = grant.revokedAt || (grant.expiresAt && grant.expiresAt * 1000 < Date.now());
+                  return el('tr', {}, [
+                    el('td', { class: 'mono', text: grant.id }),
+                    el('td', { text: grant.label }),
+                    el('td', {}, [
+                      el('span', {
+                        class: `tag ${dead ? 'dead' : 'live'}`,
+                        text: grant.revokedAt ? 'revoked' : dead ? 'expired' : grant.redactValues ? 'live, proxy only' : 'live',
+                      }),
+                    ]),
+                    el('td', { text: `${grant.useCount}×` }),
+                    el('td', {}, [
+                      dead
+                        ? null
+                        : el('button', {
+                            class: 'btn danger',
+                            text: 'Revoke',
+                            onclick: async () => {
+                              await api(`/api/bundles/${encodeURIComponent(bundle.id)}/grants/${grant.id}`, { method: 'DELETE' });
+                              toast('revoked — the daemon drops it on the next request');
+                              render();
+                            },
+                          }),
+                    ]),
+                  ]);
+                })),
+              ])
+            : el('p', { class: 'sub', text: 'None yet.' }),
+        );
+      }
+
+      function issueToken(bundle) {
+        const label = el('input', { placeholder: 'who is this for?', value: 'agent' });
+        const days = el('input', { type: 'number', value: '7', min: '0', style: 'width:80px' });
+        const proxyOnly = el('input', { type: 'checkbox', checked: 'checked' });
+        const dialog = el('dialog');
+        dialog.append(
+          el('h2', { text: `Token for ${bundle.name}` }),
+          el('p', { class: 'sub', text: 'Shown once. It only works while cookiejar is running and unlocked.' }),
+          el('div', { class: 'row', style: 'margin-bottom:10px' }, [el('span', { class: 'note', text: 'label' }), label, el('span', { class: 'note', text: 'expires in (days)' }), days]),
+          el('label', { class: 'row', style: 'margin-bottom:16px' }, [proxyOnly, el('span', { class: 'note', text: 'proxy only — the agent can make authenticated requests but never sees a cookie value' })]),
+          el('div', { class: 'row' }, [
+            el('span', { class: 'spacer' }),
+            el('button', { class: 'btn', text: 'Cancel', onclick: () => dialog.close() }),
+            el('button', {
+              class: 'btn primary',
+              text: 'Issue',
+              onclick: async () => {
+                try {
+                  const result = await api(`/api/bundles/${encodeURIComponent(bundle.id)}/grants`, {
+                    method: 'POST',
+                    body: JSON.stringify({ label: label.value, expiresInDays: Number(days.value), redactValues: proxyOnly.checked }),
+                  });
+                  dialog.replaceChildren(
+                    el('h2', { text: 'Copy this now' }),
+                    el('pre', { class: 'token', text: result.token }),
+                    el('p', { class: 'note', text: 'cookiejar never stores the token, only its hash. Lose it and you issue a new one.' }),
+                    el('div', { class: 'row' }, [
+                      el('span', { class: 'spacer' }),
+                      el('button', {
+                        class: 'btn',
+                        text: 'Copy',
+                        onclick: () => navigator.clipboard.writeText(result.token).then(() => toast('copied')),
+                      }),
+                      el('button', { class: 'btn primary', text: 'Done', onclick: () => { dialog.close(); render(); } }),
+                    ]),
+                  );
+                } catch (error) {
+                  toast(error.message);
+                }
+              },
+            }),
+          ]),
+        );
+        document.body.append(dialog);
+        dialog.addEventListener('close', () => dialog.remove());
+        dialog.showModal();
+      }
+
+      // ── Activity ───────────────────────────────────────────────────────────
+      async function viewActivity(view) {
+        const { entries } = await api('/api/activity');
+        view.replaceChildren(
+          el('h2', { text: 'Activity' }),
+          el('p', { class: 'sub', text: 'Every unlock, bundle edit, token, and agent read. No cookie value or token is ever written here.' }),
+          el('div', { class: 'card' }, [
+            entries.length
+              ? el('table', {}, [
+                  el('thead', {}, [el('tr', {}, ['when', 'event', 'bundle', 'detail'].map((label) => el('th', { text: label })))]),
+                  el('tbody', {}, entries.map((entry) =>
+                    el('tr', {}, [
+                      el('td', { class: 'mono', text: entry.at }),
+                      el('td', { text: entry.event }),
+                      el('td', { class: 'mono', text: entry.bundleId || '' }),
+                      el('td', { text: [entry.grantLabel, entry.detail].filter(Boolean).join(' · ') }),
+                    ]),
+                  )),
+                ])
+              : el('div', { class: 'empty', text: 'Nothing yet.' }),
+          ]),
+        );
+      }
+
+      async function render() {
+        renderNav();
+        const view = document.getElementById('view');
+        try {
+          state.data.state = await api('/api/state');
+          document.getElementById('scope').textContent = scopeLine();
+          if (state.tab === 'cookies') await viewCookies(view);
+          else if (state.tab === 'suggested') await viewSuggested(view);
+          else if (state.tab === 'bundles') await viewBundles(view);
+          else await viewActivity(view);
+        } catch (error) {
+          view.replaceChildren(el('div', { class: 'card' }, [el('div', { class: 'empty', text: error.message })]));
+        }
+      }
+
+      document.getElementById('lock').addEventListener('click', async () => {
+        await api('/api/lock', { method: 'POST' });
+        document.body.replaceChildren(
+          el('main', {}, [
+            el('div', { class: 'card' }, [
+              el('h2', { text: 'Locked.' }),
+              el('p', { class: 'sub', text: 'Every token stopped working. Run cookiejar ui again to come back.' }),
+            ]),
+          ]),
+        );
+      });
+
+      render();
+    </script>
+  </body>
+</html>

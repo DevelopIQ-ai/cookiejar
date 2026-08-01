@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import { startServer } from './server/index.js';
 import { runMcpServer } from './mcp/server.js';
 import { cookieHeaderFor, resolveBundle, toNetscape, toStorageState } from './core/bundles.js';
@@ -85,8 +87,8 @@ async function localBundleCookies(bundleId: string) {
 
 const HELP = `cookiejar — local-only cookie bundles for coding agents
 
-A CLI. Commands that touch the jar ask for your master password (or read
-COOKIEJAR_PASSWORD, for scripts).
+A CLI, with an optional local UI (cookiejar ui). Commands that touch the jar
+ask for your master password (or read COOKIEJAR_PASSWORD, for scripts).
 
 Setting up
   cookiejar setup [--browsers chrome,firefox]  Pick your browsers; explains Safari's permission
@@ -103,6 +105,7 @@ Picking cookies
       Only the browsers you picked in setup are read; --all ignores that.
 
 Bundles
+  cookiejar suggest [<category>] [--all] [--yes]   Bundles worth making, from what you are signed into
   cookiejar bundles                                List bundles
   cookiejar bundle <id>                            Selectors, live cookies, tokens
   cookiejar bundle new <name> [--description <text>]
@@ -124,11 +127,30 @@ Serving agents
       Answer bundle tokens on 127.0.0.1 (MCP over a tunnel, /agent/fetch).
       Only /agent/* is served: nothing here can change a bundle.
 
+The optional UI
+  cookiejar ui [--port ${DEFAULT_PORT}] [--no-open] [--auto-lock <minutes>]
+      The same jar in a browser: sites, cookie names, bundles, tokens,
+      suggested bundles. Loopback only, and it never shows a cookie value.
+
+Teaching an agent
+  cookiejar skill [--dir <path>] [--force] [--print]
+      Write .agents/skills/cookiejar/SKILL.md into this project
+
 Being an agent
   cookiejar export [--bundle <id> | --token <token>] [--format netscape|storage-state|json] [--out <file>]
   cookiejar header --url-target <url> [--bundle <id> | --token <token>]
   cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}]
 `;
+
+/** Best effort: the URL is printed either way. */
+function openInBrowser(url: string): void {
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+  try {
+    spawn(command, [url], { stdio: 'ignore', detached: true }).unref();
+  } catch {
+    // No desktop here; the printed link is enough.
+  }
+}
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -146,6 +168,33 @@ async function main(): Promise<void> {
       const { url } = await startServer({ port, vault, autoLockMinutes: autoLock });
       console.log(`cookiejar is answering agent tokens at ${url}`);
       console.log(`auto-lock: ${autoLock ? `${autoLock} idle minutes` : 'off'}  ·  stop it to cut every agent off`);
+      return;
+    }
+    case 'ui': {
+      const port = flagNumber(args, 'port', DEFAULT_PORT);
+      const autoLock = flagNumber(args, 'auto-lock', 30);
+      const vault = await openVault();
+      // The key never leaves the terminal until the browser trades it for a
+      // session cookie, so an unrelated page on this machine cannot get in.
+      const sessionKey = crypto.randomBytes(24).toString('base64url');
+      const { url } = await startServer({ port, vault, autoLockMinutes: autoLock, ui: { sessionKey } });
+      const entry = `${url}/?k=${sessionKey}`;
+      console.log(`cookiejar is at ${entry}`);
+      console.log(`agent tokens are answered here too  ·  auto-lock: ${autoLock ? `${autoLock} idle minutes` : 'off'}`);
+      console.log('stop it (or lock the jar in the UI) to cut every agent off');
+      if (!flagBool(args, 'no-open')) openInBrowser(entry);
+      return;
+    }
+    case 'suggest': {
+      await cmd.suggest(await openVault(), {
+        categoryId: args.rest[0],
+        all: flagBool(args, 'all'),
+        yes: flagBool(args, 'yes'),
+      });
+      return;
+    }
+    case 'skill': {
+      cmd.installSkill({ dir: flagString(args, 'dir'), force: flagBool(args, 'force'), print: flagBool(args, 'print') });
       return;
     }
     case 'mcp': {

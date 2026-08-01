@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `cookiejar suggest` groups the sites you are signed into into bundles worth making — travel,
+  work, developer infrastructure, finance, shopping, social, AI tools. It takes the cookies that
+  look like a session and skips analytics-only sites, prints names only, and writes nothing until
+  you accept a category with `cookiejar suggest <category>`.
+- The UI is back, and optional: `cookiejar ui` serves the same jar on 127.0.0.1 for browsing sites
+  and cookie names, making bundles, accepting suggestions, and issuing or revoking tokens. The page
+  is handed only to the browser that opens the link printed in the terminal, cross-origin writes are
+  refused, and no cookie value ever reaches it. `cookiejar serve` is unchanged and still agent-only.
+- `cookiejar skill` writes `.agents/skills/cookiejar/SKILL.md` into your project so a coding agent
+  knows how to use a bundle token, and what it must never do with one. It will not overwrite an
+  edited copy without `--force`.
 - Nothing needs the vault edited by hand any more: `cookiejar bundle edit` renames a bundle or
   changes its description, `cookiejar tokens [--live]` lists every token the jar handed out,
   `cookiejar token revoke --all [<bundle>]` is a panic switch that cuts every live token off, and

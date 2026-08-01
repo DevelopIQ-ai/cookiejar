@@ -26,6 +26,12 @@ const chromeCookies = [
   ['.figma.com', '__Host-figma.authn', 'demo-figma-authn', '/', YEAR, 1, 1, 2],
   ['.stripe.com', 'sk_session', 'demo-stripe-session', '/', YEAR, 1, 1, 2],
   ['.news.ycombinator.com', 'user', 'demo-hn-user', '/', YEAR, 0, 0, 1],
+  ['.united.com', 'SESSION_ID', 'demo-united-session', '/', YEAR, 1, 1, 1],
+  ['.delta.com', 'dl_auth_token', 'demo-delta-token', '/', YEAR, 1, 1, 1],
+  ['.booking.com', 'bkng_sso_session', 'demo-booking-session', '/', YEAR, 1, 1, 1],
+  ['.airbnb.com', '_airbed_session_id', 'demo-airbnb-session', '/', YEAR, 1, 1, 1],
+  ['.marriott.com', 'MI_SESSION', 'demo-marriott-session', '/', YEAR, 1, 1, 1],
+  ['.amazon.com', 'session-token', 'demo-amazon-session', '/', YEAR, 1, 1, 1],
   ['.doubleclick.net', 'IDE', 'demo-ad-id', '/', YEAR, 0, 0, 0],
 ];
 

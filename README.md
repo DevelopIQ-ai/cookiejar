@@ -85,6 +85,9 @@ auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 | **Reads live from your browsers** | Chrome, Chromium, Brave, Edge, Arc, Firefox, and Safari on macOS. It copies the locked SQLite store to a temp file first and never writes back. |
 | **Stores selectors, not values** | The vault holds only profile + domain + cookie names. Values are read fresh every time, so re-logging in the browser refreshes every agent, and a stolen vault file leaks nothing but bundle names. |
 | **Bundles by site** | Pick the cookies an agent actually needs and name the bundle. Add, rename, or remove selectors from the terminal. |
+| **Suggested bundles** | `cookiejar suggest` reads what you are signed into and proposes bundles worth making — travel, work, finance, dev, shopping, social, AI — taking the cookies that look like a session and skipping analytics-only sites. Nothing is written until you accept. |
+| **An optional UI** | `cookiejar ui` opens the same jar in a browser on 127.0.0.1: sites, cookie names, bundles, tokens, suggestions. Everything it can do, the terminal can do. It never shows a cookie value either. |
+| **A skill for your agent** | `cookiejar skill` writes `.agents/skills/cookiejar/SKILL.md` into your project, so a coding agent knows how to use a token, and what it must never do with one. |
 | **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. Revoke it, or revoke every live token at once. |
 | **Proxy-only mode** | The agent can make authenticated requests through `POST /agent/fetch` but never sees a cookie value. |
 | **MCP, CLI, and HTTP agents** | Tools for `describe_bundle`, `get_cookie_header`, `export_cookies`, `http_request`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
@@ -98,7 +101,14 @@ cookiejar sites         # list sites you have cookies for
 cookiejar cookies <site> --all   # names and flags; --all reads every browser
 ```
 
-Create a bundle, add a site, and issue a token:
+Let it propose the bundles for you, then accept the ones you want:
+
+```bash
+cookiejar suggest                 # travel, work, finance … grouped from your logins
+cookiejar suggest travel          # review that one, then confirm to create it
+```
+
+Or create a bundle, add a site, and issue a token by hand:
 
 ```bash
 cookiejar bundle new "linear agent"
@@ -107,6 +117,28 @@ cookiejar token new linear-agent-1d247f --label devin --days 7
 ```
 
 For scripts: `cookiejar setup --browsers chrome,firefox` and `COOKIEJAR_PASSWORD=…`.
+
+## If you would rather click
+
+```bash
+cookiejar ui        # opens http://127.0.0.1:4088
+```
+
+The UI is optional and loopback-only. It serves the page just once, to the
+browser that opens the link printed in your terminal, and refuses any request
+from another origin. Cookie values never reach it — the same names and flags
+the CLI prints, and nothing more. Agent tokens are answered on the same port,
+so `cookiejar ui` also does the job of `cookiejar serve`.
+
+## Teach your agent to use it
+
+```bash
+cookiejar skill     # writes .agents/skills/cookiejar/SKILL.md
+```
+
+Commit that file and any coding agent that reads skills will know how to call
+`/agent/fetch`, when to prefer a proxy-only token, and that it must never log a
+cookie value.
 
 ## Point any coding agent at it
 

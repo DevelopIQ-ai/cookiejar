@@ -1,4 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Vault, VaultLockedError } from '../core/vault.js';
 import {
   bareDomain,
@@ -8,6 +11,7 @@ import {
   toStorageState,
 } from '../core/bundles.js';
 import { AccessDeniedError, authorize, noteUse } from '../core/access.js';
+import { createSession, handleManageApi, originAllowed } from './manage.js';
 import { bearerToken, readJsonBody, sendJson } from './util.js';
 
 export interface ServerOptions {
@@ -17,7 +21,16 @@ export interface ServerOptions {
   vault: Vault;
   /** Locks the vault after this many idle minutes. 0 disables auto-lock. */
   autoLockMinutes?: number;
+  /**
+   * Serves the management UI as well as `/agent/*`. The key is printed in the
+   * terminal and exchanged for a session cookie on the first page load, so the
+   * browser cannot reach the vault without having seen the terminal.
+   */
+  ui?: { sessionKey: string };
 }
+
+const uiFile = (): string =>
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'index.html');
 
 /**
  * The agent side of cookiejar: a loopback HTTP server that answers bundle
@@ -29,6 +42,7 @@ export function createServer(options: ServerOptions) {
   const port = options.port;
   const autoLockMs = (options.autoLockMinutes ?? 30) * 60_000;
   let lastUse = Date.now();
+  const session = createSession();
 
   const expire = (): void => {
     if (autoLockMs > 0 && vault.unlocked && Date.now() - lastUse > autoLockMs) vault.lock();
@@ -147,14 +161,55 @@ export function createServer(options: ServerOptions) {
     return true;
   }
 
+  /** Serves the single-file UI, and only that file. */
+  function serveUi(req: IncomingMessage, res: ServerResponse, url: URL): void {
+    if (url.searchParams.get('k') === options.ui!.sessionKey) {
+      session.grant(res);
+      res.writeHead(302, { location: '/' });
+      res.end();
+      return;
+    }
+    if (!session.authorized(req)) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Open the link cookiejar printed in your terminal.\n');
+      return;
+    }
+    const file = uiFile();
+    if (!fs.existsSync(file)) {
+      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('UI is missing from this install. Run npm run build.\n');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:",
+      'referrer-policy': 'no-referrer',
+    });
+    fs.createReadStream(file).pipe(res);
+  }
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
     void (async () => {
       try {
         if (await handleAgentApi(req, res, url)) return;
         if (url.pathname === '/health') {
-          sendJson(res, 200, { ok: true, unlocked: vault.unlocked });
+          sendJson(res, 200, { ok: true, unlocked: vault.unlocked, ui: Boolean(options.ui) });
           return;
+        }
+        if (options.ui) {
+          if (req.method !== 'GET' && !originAllowed(req, port)) {
+            sendJson(res, 403, { error: 'cross-origin request refused' });
+            return;
+          }
+          expire();
+          lastUse = Date.now();
+          if (await handleManageApi(req, res, url, { vault, sessionKey: options.ui.sessionKey, port }, session)) return;
+          if (url.pathname === '/') {
+            serveUi(req, res, url);
+            return;
+          }
         }
         sendJson(res, 404, { error: 'cookiejar serves /agent/* only; manage bundles with the cookiejar CLI' });
       } catch (error) {

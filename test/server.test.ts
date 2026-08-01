@@ -127,8 +127,8 @@ test('the daemon manages nothing', async () => {
   for (const route of ['/api/bundles', '/api/state', '/']) {
     assert.equal((await agent(route, token)).status, 404, `${route} is not served`);
   }
-  const health = (await (await fetch(new URL('/health', url))).json()) as { ok: boolean; unlocked: boolean };
-  assert.deepEqual(health, { ok: true, unlocked: true });
+  const health = (await (await fetch(new URL('/health', url))).json()) as { ok: boolean; unlocked: boolean; ui: boolean };
+  assert.deepEqual(health, { ok: true, unlocked: true, ui: false });
 });
 
 // Last: changing the password locks the daemon out for good.

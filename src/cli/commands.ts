@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { readAudit } from '../core/audit.js';
 import { installedBrowsers, profileHealth, readAllProfiles, safariAccess, toMeta } from '../core/browsers/index.js';
@@ -15,6 +17,7 @@ import {
   updateBundle,
 } from '../core/manage.js';
 import { auditPath, vaultPath } from '../core/paths.js';
+import { suggestBundles } from '../core/suggest.js';
 import type { Bundle, BrowserId, CookieMeta } from '../core/types.js';
 import type { Vault } from '../core/vault.js';
 import { ask, confirm } from './prompt.js';
@@ -173,6 +176,77 @@ export function listCookies(vault: Vault, site: string, opts: { profileId?: stri
       .join(' ');
     console.log(`${pad(cookie.name, width)}  ${pad(cookie.domain, domainWidth)}  ${pad(cookie.profileId, profileWidth)}  ${flags}`);
   }
+}
+
+/**
+ * Groups the cookies you already have into bundles worth making, so nobody has
+ * to hand an agent one site at a time. Nothing is written until you accept.
+ */
+export async function suggest(
+  vault: Vault,
+  opts: { categoryId?: string; all?: boolean; yes?: boolean } = {},
+): Promise<void> {
+  const suggestions = suggestBundles(chosenBrowsers(vault, opts.all));
+  if (suggestions.length === 0) {
+    console.log('Nothing to suggest yet: no signed-in site matched a category.');
+    console.log('cookiejar sites shows everything readable; cookiejar bundle new makes one by hand.');
+    return;
+  }
+
+  const wanted = opts.categoryId ? suggestions.filter((s) => s.categoryId === opts.categoryId) : suggestions;
+  if (wanted.length === 0) {
+    throw new CliError(`no suggestion called ${opts.categoryId} — try: ${suggestions.map((s) => s.categoryId).join(', ')}`);
+  }
+
+  for (const suggestion of wanted) {
+    const sites = suggestion.sites;
+    console.log(`\n${suggestion.categoryId}  ${plural(sites.length, 'site')}`);
+    console.log(`  ${suggestion.description}`);
+    const width = Math.max(...sites.map((site) => site.site.length));
+    for (const site of sites) {
+      // Names only, as everywhere else in the CLI.
+      console.log(`  ${pad(site.site, width)}  ${pad(site.profileId, 14)}  ${site.authNames.join(', ')}`);
+    }
+
+    if (!opts.categoryId && !opts.yes) continue;
+    const accepted = opts.yes || (await confirm(`\nCreate a "${suggestion.name}" bundle from these? `));
+    if (!accepted) continue;
+    const bundle = createBundle(vault, {
+      name: suggestion.name,
+      description: suggestion.description,
+      selectors: suggestion.selectors,
+    });
+    console.log(`created ${bundle.id} with ${plural(bundle.selectors.length, 'site')}`);
+    console.log(`  cookiejar bundle ${bundle.id}          see what it resolves to right now`);
+    console.log(`  cookiejar token new ${bundle.id} --proxy-only   hand it to an agent`);
+  }
+
+  if (!opts.categoryId && !opts.yes) {
+    console.log(`\nAccept one with: cookiejar suggest ${wanted[0].categoryId}`);
+    console.log('Selectors take the cookies that look like a session, so an agent gets a login and nothing else.');
+  }
+}
+
+/**
+ * Drops a SKILL.md into the current project so a coding agent knows how to use
+ * a token without being told. Never clobbers an edited copy.
+ */
+export function installSkill(opts: { dir?: string; force?: boolean; print?: boolean } = {}): void {
+  const template = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skill', 'SKILL.md');
+  if (!fs.existsSync(template)) throw new CliError('the skill template is missing from this install');
+  const body = fs.readFileSync(template, 'utf8');
+  if (opts.print) {
+    process.stdout.write(body);
+    return;
+  }
+  const target = path.resolve(opts.dir ?? '.agents/skills/cookiejar', 'SKILL.md');
+  if (fs.existsSync(target) && !opts.force) {
+    throw new CliError(`${target} already exists — pass --force to overwrite it`);
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, body);
+  console.log(`wrote ${target}`);
+  console.log('Commit it, then give the agent a token: cookiejar token new <bundle> --proxy-only');
 }
 
 export function listBundles(vault: Vault): void {
