@@ -10,12 +10,15 @@ import {
   createBundle,
   deleteBundle,
   grantId,
+  isLive,
   issueGrant,
   removeSelector,
   revokeGrant,
   setPreferences,
   updateBundle,
 } from '../core/manage.js';
+import { decodeConnection, forgetConnection, saveConnection, type Connection } from '../core/connect.js';
+import { keyring } from '../core/keyring.js';
 import { auditPath, vaultPath } from '../core/paths.js';
 import { suggestBundles } from '../core/suggest.js';
 import type { Bundle, BrowserId, CookieMeta } from '../core/types.js';
@@ -96,10 +99,11 @@ export function status(vault: Vault, daemonUrl: string, daemonRunning: boolean):
   const bundles = vault.read().bundles;
   const preferences = vault.read().preferences;
   console.log(`vault      ${vaultPath()}`);
+  console.log(`key        ${vault.protection === 'keyring' ? keyring().where : 'a master password you type'}`);
   console.log(`browsers   ${preferences?.onboardedAt ? preferences.browsers.join(', ') : 'not set up yet (cookiejar setup)'}`);
   console.log(`profiles   ${health.usable.length} readable, ${health.blocked.length} blocked, ${health.empty.length} empty`);
   console.log(`bundles    ${bundles.length}`);
-  const grants = bundles.flatMap((b) => b.grants).filter((g) => !g.revokedAt);
+  const grants = bundles.flatMap((b) => b.grants).filter(isLive);
   console.log(`tokens     ${grants.length} live`);
   console.log(`agents     ${daemonUrl} — running: ${daemonRunning ? 'yes' : 'no (cookiejar serve)'}`);
 }
@@ -256,7 +260,7 @@ export function listBundles(vault: Vault): void {
     return;
   }
   for (const bundle of bundles) {
-    const live = bundle.grants.filter((g) => !g.revokedAt).length;
+    const live = bundle.grants.filter(isLive).length;
     const sites = new Set(bundle.selectors.map((s) => bareDomain(s.domain))).size;
     console.log(`${pad(bundle.id, 24)}  ${pad(bundle.name, 20)} ${plural(sites, 'site')}, ${plural(live, 'live token')}`);
   }
@@ -380,7 +384,7 @@ export function revoke(vault: Vault, bundleId: string, id: string): void {
 /** The panic switch: cut off every live token, in one bundle or in all of them. */
 export function revokeAll(vault: Vault, bundleId?: string): void {
   const bundles = bundleId ? [vault.bundle(bundleId)] : vault.read().bundles;
-  const live = bundles.flatMap((bundle) => bundle.grants.filter((g) => !g.revokedAt).map((g) => ({ bundle, grant: g })));
+  const live = bundles.flatMap((bundle) => bundle.grants.filter(isLive).map((g) => ({ bundle, grant: g })));
   if (live.length === 0) {
     console.log('no live tokens');
     return;
@@ -435,6 +439,9 @@ export async function reset(force: boolean): Promise<void> {
   if (!force && !(await confirm('Delete the jar?'))) return;
   fs.rmSync(vaultPath(), { force: true });
   fs.rmSync(auditPath(), { force: true });
+  // The old key is useless now, and leaving it in the keyring is just litter.
+  keyring().clear();
+  forgetConnection();
   console.log('deleted — cookiejar setup starts a new one');
 }
 
@@ -490,6 +497,70 @@ export function activity(limit: number, bundleId?: string): void {
       `${entry.at}  ${pad(entry.event, 16)} ${pad(entry.bundleId ?? '', 24)} ${entry.grantLabel ?? ''} ${entry.detail ?? ''}`.trimEnd(),
     );
   }
+}
+
+/** Sets (or replaces) a passphrase on a jar that is already open. */
+export async function setPassword(vault: Vault): Promise<void> {
+  const next = await newPassword('New master password (8+ characters): ');
+  vault.adoptPassword(next);
+  console.log('master password set — cookiejar passwd --none undoes this');
+}
+
+/** Stops the prompts by moving the key into the OS keyring. */
+export function useKeyring(vault: Vault): void {
+  if (vault.protection === 'keyring') {
+    console.log(`already keyring-backed — the key is in ${keyring().where}`);
+    return;
+  }
+  vault.adoptKeyring();
+  console.log(`the key is in ${keyring().where} now, so cookiejar will not ask for a password again`);
+  console.log('the jar itself is still encrypted; anyone who can log in as you can open it');
+}
+
+const expiryNote = (connection: Connection): string => {
+  if (!connection.expiresAt) return 'no expiry';
+  const minutes = Math.round((connection.expiresAt * 1000 - Date.now()) / 60_000);
+  return minutes > 0 ? `about ${plural(minutes, 'minute')} left` : 'already expired';
+};
+
+/**
+ * The agent's half of `cookiejar lend`: check the string works, say what it
+ * reaches, and remember it so the other commands need no flags.
+ */
+export async function connect(value: string, opts: { save?: boolean } = {}): Promise<void> {
+  const connection = decodeConnection(value);
+  if (connection.expiresAt && connection.expiresAt * 1000 < Date.now()) {
+    throw new CliError('that loan already expired — ask for a fresh cookiejar lend');
+  }
+  const response = await fetch(new URL('/agent/bundle', connection.url), {
+    headers: { authorization: `Bearer ${connection.token}` },
+  });
+  const text = await response.text();
+  if (!response.ok) throw new CliError(`that bundle is not reachable: ${response.status} ${text}`);
+
+  const described = JSON.parse(text) as {
+    bundle: { name: string };
+    hosts: string[];
+    cookieCount: number;
+    permissions: { allowFetch: boolean; redactValues: boolean };
+  };
+  const readable = !described.permissions.redactValues;
+
+  console.log(`connected to "${described.bundle.name}" · ${expiryNote(connection)}`);
+  console.log(`hosts   ${described.hosts.join(', ') || 'none right now'}`);
+  console.log(`cookies ${described.cookieCount}, values ${readable ? 'readable' : 'hidden (proxy only)'}`);
+
+  if (opts.save === false) return;
+  const file = saveConnection(connection);
+  console.log(`\nsaved to ${file} — these now work with no flags:`);
+  console.log('  cookiejar fetch <url>            request that URL as the lender');
+  if (readable) console.log('  cookiejar export --format storage-state');
+  console.log('  cookiejar mcp                    expose it to this agent over MCP');
+}
+
+export function disconnect(): void {
+  forgetConnection();
+  console.log('forgot the borrowed bundle');
 }
 
 export async function changePassword(vault: Vault, current: string): Promise<void> {

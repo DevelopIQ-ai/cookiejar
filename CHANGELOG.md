@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- No more password prompts. A new jar keeps its key in the OS keyring (macOS Keychain, libsecret on
+  Linux, a 0600 file where neither exists), so ordinary commands just open it. The vault file is
+  still encrypted; `cookiejar passwd` puts a master password back on it and `cookiejar passwd --none`
+  moves the key to the keyring. Existing password-protected jars keep working as they are.
+- `cookiejar lend <bundle> [--minutes 60]` is the whole cloud handover in one command: it serves the
+  bundle, brings up an HTTPS Cloudflare quick tunnel, mints a proxy-only token that expires, and
+  prints one `cjr1.…` connect string. Ctrl-C revokes the token and takes the address down. The
+  `cloudflared` it fetches is a pinned release checked against its SHA-256, or one you already have.
+- The agent's half: `cookiejar connect <string>` checks the loan, reports what it reaches, and
+  remembers it, so `cookiejar fetch <url>`, `export` and `mcp` need no flags. `cookiejar disconnect`
+  forgets it. Connect strings must be HTTPS unless they point at this machine.
+- `cookiejar mcp --manage` lets an agent on your machine look after bundles: `list_sites`,
+  `list_cookies`, `suggest_bundles`, `create_bundle`, `add_site`, `remove_site`, `rename_bundle`,
+  `show_bundle`, `list_tokens`, `issue_token`, `revoke_token`. None of them return a cookie value.
+- The UI has a Tokens tab: every token the jar ever handed out, what it reaches, when it expires,
+  how often it was used, and a revoke button.
+
 ## 0.3.0
 
 - `cookiejar suggest` groups the sites you are signed into into bundles worth making — travel,

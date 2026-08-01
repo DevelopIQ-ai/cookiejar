@@ -148,6 +148,7 @@
         ['cookies', 'Cookies'],
         ['suggested', 'Suggested bundles'],
         ['bundles', 'Bundles'],
+        ['tokens', 'Tokens'],
         ['activity', 'Activity'],
       ];
 
@@ -541,6 +542,57 @@
         dialog.showModal();
       }
 
+      // ── Tokens ─────────────────────────────────────────────────────────────
+      const whenText = (seconds) => {
+        if (!seconds) return 'no expiry';
+        const minutes = Math.round((seconds * 1000 - Date.now()) / 60000);
+        if (minutes <= 0) return 'expired';
+        if (minutes < 90) return `${minutes} min left`;
+        if (minutes < 60 * 48) return `${Math.round(minutes / 60)} h left`;
+        return `${Math.round(minutes / 1440)} days left`;
+      };
+
+      async function viewTokens(view) {
+        const { tokens } = await api('/api/tokens');
+        const live = tokens.filter((token) => token.state === 'live');
+        view.replaceChildren(
+          el('h2', { text: 'Tokens' }),
+          el('p', { class: 'sub', text: `${live.length} live. A token is the only thing that lets an agent use a bundle — revoking one cuts it off on its next request.` }),
+          el('div', { class: 'card' }, [
+            tokens.length
+              ? el('table', {}, [
+                  el('thead', {}, [
+                    el('tr', {}, ['token', 'bundle', 'label', 'state', 'expires', 'used', ''].map((label) => el('th', { text: label }))),
+                  ]),
+                  el('tbody', {}, tokens.map((token) =>
+                    el('tr', {}, [
+                      el('td', { class: 'mono', text: token.id }),
+                      el('td', { text: token.bundleName }),
+                      el('td', { text: token.label }),
+                      el('td', { text: token.state === 'live' && token.proxyOnly ? 'live · proxy only' : token.state }),
+                      el('td', { text: token.state === 'live' ? whenText(token.expiresAt) : '' }),
+                      el('td', { text: token.useCount ? `${token.useCount}×` : 'never' }),
+                      el('td', {}, [
+                        token.state === 'live'
+                          ? el('button', {
+                              class: 'ghost',
+                              text: 'Revoke',
+                              onclick: async () => {
+                                await api(`/api/bundles/${encodeURIComponent(token.bundleId)}/grants/${token.id}`, { method: 'DELETE' });
+                                toast('revoked');
+                                render();
+                              },
+                            })
+                          : null,
+                      ]),
+                    ]),
+                  )),
+                ])
+              : el('div', { class: 'empty', text: 'No tokens yet. Open a bundle to issue one.' }),
+          ]),
+        );
+      }
+
       // ── Activity ───────────────────────────────────────────────────────────
       async function viewActivity(view) {
         const { entries } = await api('/api/activity');
@@ -574,6 +626,7 @@
           if (state.tab === 'cookies') await viewCookies(view);
           else if (state.tab === 'suggested') await viewSuggested(view);
           else if (state.tab === 'bundles') await viewBundles(view);
+          else if (state.tab === 'tokens') await viewTokens(view);
           else await viewActivity(view);
         } catch (error) {
           view.replaceChildren(el('div', { class: 'card' }, [el('div', { class: 'empty', text: error.message })]));

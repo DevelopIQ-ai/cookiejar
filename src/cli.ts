@@ -5,9 +5,10 @@ import { spawn } from 'node:child_process';
 import { startServer } from './server/index.js';
 import { runMcpServer } from './mcp/server.js';
 import { cookieHeaderFor, resolveBundle, toNetscape, toStorageState } from './core/bundles.js';
-import { askSecret } from './cli/prompt.js';
 import { CliError, daemonHoldsVault, openVault } from './cli/vault.js';
 import * as cmd from './cli/commands.js';
+import { lend } from './cli/lend.js';
+import { loadConnection } from './core/connect.js';
 import { VERSION } from './core/version.js';
 
 // node:sqlite is how we read cookie stores; its experimental banner is noise here.
@@ -62,14 +63,25 @@ function positional(args: Args, index: number, what: string): string {
   return value;
 }
 
+/** A token and address from a flag, the environment, or a bundle lent to us. */
+function borrowed(args: Args): { url: string; token?: string } {
+  const saved = loadConnection();
+  return {
+    url: flagString(args, 'url') ?? process.env.COOKIEJAR_URL ?? saved?.url ?? DEFAULT_URL,
+    token: flagString(args, 'token') ?? process.env.COOKIEJAR_TOKEN ?? saved?.token,
+  };
+}
+
 function requireToken(args: Args): string {
-  const token = flagString(args, 'token') ?? process.env.COOKIEJAR_TOKEN;
-  if (!token) throw new CliError('A bundle token is required. Pass --token or set COOKIEJAR_TOKEN.');
+  const { token } = borrowed(args);
+  if (!token) {
+    throw new CliError('A bundle token is required — run cookiejar connect <string>, pass --token, or set COOKIEJAR_TOKEN.');
+  }
   return token;
 }
 
 async function agentGet(args: Args, route: string): Promise<string> {
-  const base = flagString(args, 'url', DEFAULT_URL)!;
+  const base = borrowed(args).url;
   const response = await fetch(new URL(route, base), { headers: { authorization: `Bearer ${requireToken(args)}` } });
   const text = await response.text();
   if (!response.ok) throw new CliError(text);
@@ -87,15 +99,16 @@ async function localBundleCookies(bundleId: string) {
 
 const HELP = `cookiejar — local-only cookie bundles for coding agents
 
-A CLI, with an optional local UI (cookiejar ui). Commands that touch the jar
-ask for your master password (or read COOKIEJAR_PASSWORD, for scripts).
+A CLI, with an optional local UI (cookiejar ui). The jar's key lives in your
+OS keyring, so nothing asks you for a password unless you set one.
 
 Setting up
   cookiejar setup [--browsers chrome,firefox]  Pick your browsers; explains Safari's permission
   cookiejar status                       Where the jar is, what is readable, what exists
   cookiejar doctor                       Which browser profiles can be read, and why not
   cookiejar profiles                     Every discovered profile, including empty ones
-  cookiejar passwd                       Change the master password
+  cookiejar passwd                       Put a master password on the jar
+  cookiejar passwd --none                Keep the key in the OS keyring: no prompts
   cookiejar reset [--force]              Delete the jar — for a forgotten password
   cookiejar version                      Print the version
 
@@ -113,6 +126,14 @@ Bundles
   cookiejar bundle add <id> <site> [--profile <id>] [--names a,b] [--pick] [--all]
   cookiejar bundle remove <id> <site> [--profile <id>]
   cookiejar bundle rm <id> [--force]
+
+Lending a bundle to an agent somewhere else
+  cookiejar lend <bundle> [--minutes 60] [--values] [--local]
+      Serve it, tunnel it, mint a short proxy-only token, print one string.
+      Ctrl-C revokes the token and takes the address down.
+  cookiejar connect <string>            On the agent's side: check it and remember it
+  cookiejar fetch <url> [--method POST] [--data <body>]  Request a site as the lender
+  cookiejar disconnect                  Forget a bundle lent to this machine
 
 Giving a bundle to an agent
   cookiejar token new <bundle> [--label <who>] [--days 30] [--proxy-only] [--no-fetch]
@@ -139,7 +160,9 @@ Teaching an agent
 Being an agent
   cookiejar export [--bundle <id> | --token <token>] [--format netscape|storage-state|json] [--out <file>]
   cookiejar header --url-target <url> [--bundle <id> | --token <token>]
-  cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}]
+  cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}] [--manage]
+      --manage also exposes bundle upkeep to an agent on this machine:
+      it can see sites and cookie names, edit bundles, and issue tokens.
 `;
 
 /** Best effort: the URL is printed either way. */
@@ -198,7 +221,47 @@ async function main(): Promise<void> {
       return;
     }
     case 'mcp': {
-      runMcpServer({ daemonUrl: flagString(args, 'url', DEFAULT_URL)!, token: requireToken(args) });
+      const manage = flagBool(args, 'manage');
+      const { url, token } = borrowed(args);
+      if (!manage && !token) requireToken(args);
+      runMcpServer({ daemonUrl: url, token, manage: manage ? await openVault() : undefined });
+      return;
+    }
+    case 'lend': {
+      await lend(await openVault(), positional(args, 0, 'a bundle id'), {
+        minutes: flagNumber(args, 'minutes', 60),
+        port: flagNumber(args, 'port', DEFAULT_PORT),
+        values: flagBool(args, 'values'),
+        local: flagBool(args, 'local'),
+        label: flagString(args, 'label'),
+      });
+      return;
+    }
+    case 'connect': {
+      await cmd.connect(positional(args, 0, 'a connect string'), { save: !flagBool(args, 'no-save') });
+      return;
+    }
+    case 'disconnect': {
+      cmd.disconnect();
+      return;
+    }
+    case 'fetch': {
+      const target = positional(args, 0, 'a url');
+      const { url } = borrowed(args);
+      const response = await fetch(new URL('/agent/fetch', url), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${requireToken(args)}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: target,
+          method: flagString(args, 'method', 'GET'),
+          body: flagString(args, 'data'),
+        }),
+      });
+      const text = await response.text();
+      if (!response.ok) throw new CliError(text);
+      const result = JSON.parse(text) as { status: number; body: string };
+      if (result.status >= 400) console.error(`upstream returned ${result.status}`);
+      process.stdout.write(result.body);
       return;
     }
     case 'setup': {
@@ -222,8 +285,10 @@ async function main(): Promise<void> {
       return;
     }
     case 'passwd': {
-      const current = process.env.COOKIEJAR_PASSWORD ?? (await askSecret('Current master password: '));
-      await cmd.changePassword(await openVault(), current);
+      // openVault has already proved we can open the jar, so nothing asks twice.
+      const vault = await openVault();
+      if (flagBool(args, 'none')) cmd.useKeyring(vault);
+      else await cmd.setPassword(vault);
       return;
     }
     case 'sites': {

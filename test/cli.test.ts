@@ -176,6 +176,6 @@ test('skill drops a SKILL.md an agent can pick up, and will not clobber it', () 
   run('skill', '--dir', path.dirname(target), '--force');
   assert.notEqual(fs.readFileSync(target, 'utf8'), 'mine');
 
-  assert.match(run('skill', '--print'), /Using a cookiejar bundle/);
+  assert.match(run('skill', '--print'), /Maintaining a bundle/);
   fs.rmSync(project, { recursive: true, force: true });
 });

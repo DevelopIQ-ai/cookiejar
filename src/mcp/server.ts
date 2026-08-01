@@ -1,5 +1,7 @@
 import readline from 'node:readline';
 import { VERSION } from '../core/version.js';
+import { MANAGE_TOOLS, runManageTool } from './manage.js';
+import type { Vault } from '../core/vault.js';
 
 /**
  * A dependency-free MCP stdio server. It holds no cookies itself: every tool
@@ -8,7 +10,14 @@ import { VERSION } from '../core/version.js';
  */
 export interface McpOptions {
   daemonUrl: string;
-  token: string;
+  /** Absent in manage-only mode, where there is no bundle to borrow. */
+  token?: string;
+  /**
+   * An unlocked vault, for an agent on this machine that is allowed to keep
+   * bundles tidy. With it the server also offers the management tools; without
+   * it the agent can only use the one bundle its token covers.
+   */
+  manage?: Vault;
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
 }
@@ -68,6 +77,7 @@ const TOOLS = [
 ] as const;
 
 export function runMcpServer(options: McpOptions): void {
+  const tools = [...(options.token ? TOOLS : []), ...(options.manage ? MANAGE_TOOLS : [])];
   const input = options.stdin ?? process.stdin;
   const output = options.stdout ?? process.stdout;
   const rl = readline.createInterface({ input, crlfDelay: Infinity });
@@ -92,6 +102,10 @@ export function runMcpServer(options: McpOptions): void {
   };
 
   const runTool = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    if (options.manage && MANAGE_TOOLS.some((tool) => tool.name === name)) {
+      return JSON.stringify(await runManageTool(options.manage, name, args), null, 2);
+    }
+    if (!options.token) throw new Error('this cookiejar MCP server has no bundle token; it can only manage bundles');
     switch (name) {
       case 'describe_bundle':
         return call('/agent/bundle');
@@ -138,7 +152,7 @@ export function runMcpServer(options: McpOptions): void {
         reply({});
         return;
       case 'tools/list':
-        reply({ tools: TOOLS });
+        reply({ tools });
         return;
       case 'tools/call': {
         const params = (request.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };

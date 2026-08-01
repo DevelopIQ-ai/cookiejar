@@ -100,6 +100,10 @@ export function issueGrant(vault: Vault, bundleId: string, input: GrantInput): {
 
 export const grantId = (grant: BundleGrant): string => grant.tokenHash.slice(0, 12);
 
+/** Live means usable right now: neither revoked nor past its expiry. */
+export const isLive = (grant: BundleGrant): boolean =>
+  !grant.revokedAt && !(grant.expiresAt && grant.expiresAt * 1000 < Date.now());
+
 export function revokeGrant(vault: Vault, bundleId: string, id: string): BundleGrant {
   const grant = vault.bundle(bundleId).grants.find((g) => g.tokenHash.startsWith(id));
   if (!grant) throw new Error(`no such token: ${id}`);
