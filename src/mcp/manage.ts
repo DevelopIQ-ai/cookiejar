@@ -4,6 +4,7 @@ import {
   addSelector,
   createBundle,
   grantId,
+  isLive,
   issueGrant,
   removeSelector,
   revokeGrant,
@@ -142,6 +143,13 @@ export const MANAGE_TOOLS = [
 
 const str = (value: unknown): string => String(value ?? '');
 
+/** Required arguments, named in the error: an agent that forgot one should be told which. */
+const need = (args: Record<string, unknown>, field: string): string => {
+  const value = args[field];
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`${field} is required`);
+  return value;
+};
+
 function chosen(vault: Vault): BrowserId[] | undefined {
   const preferences = vault.read().preferences;
   return preferences?.onboardedAt && preferences.browsers.length > 0 ? preferences.browsers : undefined;
@@ -168,7 +176,7 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
     }
 
     case 'list_cookies': {
-      const site = str(args.site);
+      const site = need(args, 'site');
       return profileHealth(args.profileId ? [str(args.profileId)] : undefined, chosen(vault))
         .usable.flatMap((read) => read.cookies)
         .filter((cookie) => domainCovers(site, cookie.domain))
@@ -189,11 +197,11 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
         name: bundle.name,
         description: bundle.description,
         sites: [...new Set(bundle.selectors.map((s) => s.domain))],
-        liveTokens: bundle.grants.filter((g) => !g.revokedAt).length,
+        liveTokens: bundle.grants.filter(isLive).length,
       }));
 
     case 'show_bundle': {
-      const bundle = vault.bundle(str(args.bundleId));
+      const bundle = vault.bundle(need(args, 'bundleId'));
       const resolved = resolveBundle(bundle);
       return {
         id: bundle.id,
@@ -227,7 +235,7 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
       const suggestion = from ? suggestBundles(chosen(vault)).find((s) => s.categoryId === from) : undefined;
       if (from && !suggestion) throw new Error(`no suggestion called ${from}`);
       const bundle = createBundle(vault, {
-        name: str(args.name),
+        name: need(args, 'name'),
         description: args.description ? str(args.description) : suggestion?.description,
         selectors: suggestion?.selectors,
       });
@@ -235,7 +243,7 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
     }
 
     case 'add_site': {
-      const site = str(args.site);
+      const site = need(args, 'site');
       const names = Array.isArray(args.names) ? args.names.map(str) : [];
       let profileId = args.profileId ? str(args.profileId) : undefined;
       if (!profileId) {
@@ -251,17 +259,17 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
         if (holders.length > 1) throw new Error(`${site} is signed in on ${holders.join(', ')} — pass profileId`);
         profileId = holders[0];
       }
-      const bundle = addSelector(vault, str(args.bundleId), { profileId, domain: site, names });
+      const bundle = addSelector(vault, need(args, 'bundleId'), { profileId, domain: site, names });
       return { id: bundle.id, sites: bundle.selectors.map((s) => s.domain) };
     }
 
     case 'remove_site': {
-      const bundle = removeSelector(vault, str(args.bundleId), str(args.site), args.profileId ? str(args.profileId) : undefined);
+      const bundle = removeSelector(vault, need(args, 'bundleId'), need(args, 'site'), args.profileId ? str(args.profileId) : undefined);
       return { id: bundle.id, sites: bundle.selectors.map((s) => s.domain) };
     }
 
     case 'rename_bundle': {
-      const bundle = updateBundle(vault, str(args.bundleId), {
+      const bundle = updateBundle(vault, need(args, 'bundleId'), {
         name: args.name ? str(args.name) : undefined,
         description: args.description === undefined ? undefined : str(args.description),
       });
@@ -284,7 +292,7 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
 
     case 'issue_token': {
       const minutes = typeof args.minutes === 'number' ? args.minutes : 60;
-      const { token, grant } = issueGrant(vault, str(args.bundleId), {
+      const { token, grant } = issueGrant(vault, need(args, 'bundleId'), {
         label: args.label ? str(args.label) : 'agent',
         expiresInDays: minutes / 1440,
         allowFetch: true,
@@ -300,12 +308,12 @@ export async function runManageTool(vault: Vault, name: string, args: Record<str
     }
 
     case 'revoke_token': {
-      const bundleId = str(args.bundleId);
+      const bundleId = need(args, 'bundleId');
       if (args.tokenId) {
-        const grant = revokeGrant(vault, bundleId, str(args.tokenId));
+        const grant = revokeGrant(vault, bundleId, need(args, 'tokenId'));
         return { revoked: [grantId(grant)] };
       }
-      const live = vault.bundle(bundleId).grants.filter((grant) => !grant.revokedAt);
+      const live = vault.bundle(bundleId).grants.filter(isLive);
       for (const grant of live) revokeGrant(vault, bundleId, grantId(grant));
       return { revoked: live.map(grantId) };
     }

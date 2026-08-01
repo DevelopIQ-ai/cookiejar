@@ -188,4 +188,24 @@ test('an agent on this machine can maintain a bundle without seeing a value', as
   await runManageTool(vault, 'remove_site', { bundleId: made.id, site: 'localhost' });
   const emptied = (await runManageTool(vault, 'show_bundle', { bundleId: made.id })) as { selectors: unknown[] };
   assert.equal(emptied.selectors.length, 0);
+
+  // A forgotten argument says which one, rather than looking up the empty id.
+  await assert.rejects(() => runManageTool(vault, 'show_bundle', {}), /bundleId is required/);
+  await assert.rejects(() => runManageTool(vault, 'add_site', { bundleId: made.id }), /site is required/);
+});
+
+test('an expired token is not counted as live', async () => {
+  const { Vault } = await import('../src/core/vault.js');
+  const { createBundle, issueGrant } = await import('../src/core/manage.js');
+
+  const vault = new Vault();
+  vault.unlockFromKeyring();
+  const bundle = createBundle(vault, { name: 'counting' });
+  issueGrant(vault, bundle.id, { label: 'yesterday', expiresInDays: -1 });
+
+  assert.match(run(lender, 'tokens'), /expired/);
+  const listed = run(lender, 'bundles')
+    .split('\n')
+    .find((line) => line.includes(bundle.id))!;
+  assert.match(listed, /0 live tokens/, 'the summary agrees with the token list');
 });

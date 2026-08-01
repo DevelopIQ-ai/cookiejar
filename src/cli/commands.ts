@@ -10,6 +10,7 @@ import {
   createBundle,
   deleteBundle,
   grantId,
+  isLive,
   issueGrant,
   removeSelector,
   revokeGrant,
@@ -102,7 +103,7 @@ export function status(vault: Vault, daemonUrl: string, daemonRunning: boolean):
   console.log(`browsers   ${preferences?.onboardedAt ? preferences.browsers.join(', ') : 'not set up yet (cookiejar setup)'}`);
   console.log(`profiles   ${health.usable.length} readable, ${health.blocked.length} blocked, ${health.empty.length} empty`);
   console.log(`bundles    ${bundles.length}`);
-  const grants = bundles.flatMap((b) => b.grants).filter((g) => !g.revokedAt);
+  const grants = bundles.flatMap((b) => b.grants).filter(isLive);
   console.log(`tokens     ${grants.length} live`);
   console.log(`agents     ${daemonUrl} — running: ${daemonRunning ? 'yes' : 'no (cookiejar serve)'}`);
 }
@@ -259,7 +260,7 @@ export function listBundles(vault: Vault): void {
     return;
   }
   for (const bundle of bundles) {
-    const live = bundle.grants.filter((g) => !g.revokedAt).length;
+    const live = bundle.grants.filter(isLive).length;
     const sites = new Set(bundle.selectors.map((s) => bareDomain(s.domain))).size;
     console.log(`${pad(bundle.id, 24)}  ${pad(bundle.name, 20)} ${plural(sites, 'site')}, ${plural(live, 'live token')}`);
   }
@@ -383,7 +384,7 @@ export function revoke(vault: Vault, bundleId: string, id: string): void {
 /** The panic switch: cut off every live token, in one bundle or in all of them. */
 export function revokeAll(vault: Vault, bundleId?: string): void {
   const bundles = bundleId ? [vault.bundle(bundleId)] : vault.read().bundles;
-  const live = bundles.flatMap((bundle) => bundle.grants.filter((g) => !g.revokedAt).map((g) => ({ bundle, grant: g })));
+  const live = bundles.flatMap((bundle) => bundle.grants.filter(isLive).map((g) => ({ bundle, grant: g })));
   if (live.length === 0) {
     console.log('no live tokens');
     return;
