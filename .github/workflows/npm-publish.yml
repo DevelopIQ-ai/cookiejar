@@ -31,7 +31,8 @@ jobs:
             echo "::error::the NPM_TOKEN repository secret is not set, so a release cannot publish"
             exit 1
           fi
-          echo "publishing as $(npm whoami)"
+          who=$(npm whoami)
+          echo "publishing as $who"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm publish ${{ inputs.dryRun && '--dry-run' || '' }}
