@@ -57,11 +57,40 @@ session cookie and a pinned bundle silently goes empty. Check with
 `cookiejar bundle <id>` after editing; a selector that "matches nothing right
 now" means the human is signed out, not that you should widen the bundle.
 
-If you are wired in over MCP with `cookiejar mcp --manage`, all of the above
-arrive as tools: `list_sites`, `list_cookies`, `suggest_bundles`,
-`create_bundle`, `add_site`, `remove_site`, `rename_bundle`, `show_bundle`,
-`list_tokens`, `issue_token`, `revoke_token`. None of them return a cookie
-value.
+### Wiring yourself in over MCP
+
+On the human's machine you do not need a daemon or a token — the jar is right
+there. One command writes the config for your client:
+
+```bash
+cookiejar mcp --install claude --bundle work-3f9a   # or cursor, codex, vscode
+```
+
+That registers `npx -y @puffle/cookiejar mcp --bundle work-3f9a --manage`,
+which gives you the bundle *and* the upkeep tools: `list_sites`,
+`list_cookies`, `suggest_bundles`, `create_bundle`, `add_site`, `remove_site`,
+`rename_bundle`, `show_bundle`, `list_tokens`, `issue_token`, `revoke_token`,
+plus `read_page`, `http_request`, `get_cookie_header`, `export_cookies` and
+`browser_context`. None of the management tools return a cookie value.
+
+### Reading a page, and clicking on one
+
+`read_page` (or `cookiejar fetch <url> --text`) returns the page as readable
+text with links kept, which is typically 5-50x smaller than the HTML. Use it
+for anything you intend to read; keep `http_request` for APIs and non-GET work,
+and add `--json` to pretty-print a JSON reply.
+
+When a task needs a real browser — clicking, forms, anything JavaScript renders
+— take the Playwright handoff instead of scraping:
+
+```bash
+cookiejar browser work-3f9a          # writes a 0600 storageState file, prints a snippet
+```
+
+or call `browser_context` over MCP, which returns the path. Pass it as
+`browser.newContext({ storageState })` and the browser is already signed in.
+That file holds real cookie values: keep it in the cookiejar home, never copy
+it anywhere, and never do this for a bundle that was lent to you.
 
 ### Lending it out
 
@@ -77,6 +106,15 @@ else. Ctrl-C revokes it. Keep `--minutes` as small as the task allows, and do
 not pass `--values` unless the human explicitly wants the other side to read
 raw cookies.
 
+While it runs:
+
+```bash
+cookiejar tail --bundle work-3f9a            # every request the borrower makes, live
+cookiejar token extend work-3f9a --minutes 30 # the loan ran out mid-task
+```
+
+Extending takes effect on the borrower's next request; they do not reconnect.
+
 ## Using a bundle that was lent to you
 
 With a connect string:
@@ -89,9 +127,17 @@ It reports the bundle, its hosts, whether values are readable, and how long is
 left, then remembers it. After that:
 
 ```bash
-cookiejar fetch https://linear.app/api/me            # request as the human
+cookiejar fetch https://linear.app/api/me --json     # request as the human
+cookiejar fetch https://linear.app/team/x --text     # a page as readable text
 cookiejar fetch https://linear.app/api/x --method POST --data '{"a":1}'
 ```
+
+Always prefer `--text` for a web page: raw HTML from a logged-in app is mostly
+script tags and will bury what you came for.
+
+If a host answers 401 or 403 with cookies attached, read the `hint:` line
+before assuming the loan is broken — several sites serve their website from
+cookies and their API from an API key, and no bundle can fix that.
 
 With a bare token instead, set `COOKIEJAR_TOKEN` and `COOKIEJAR_URL` and use
 the HTTP API directly:
@@ -120,8 +166,10 @@ cookiejar export --format storage-state --out /tmp/state.json  # Playwright
 
 Delete that file when the task is done.
 
-Over MCP the same capabilities arrive as `describe_bundle`, `http_request`,
-`get_cookie_header`, `export_cookies`. Prefer `http_request`.
+Over MCP the same capabilities arrive as `describe_bundle`, `read_page`,
+`http_request`, `get_cookie_header`, `export_cookies`. Prefer `read_page` for
+pages and `http_request` for APIs. `browser_context` is not offered here: a
+lent bundle cannot become a browser session.
 
 ## Rules
 
@@ -144,6 +192,7 @@ Over MCP the same capabilities arrive as `describe_bundle`, `http_request`,
 | `connection refused` | the daemon is not running: ask for `cookiejar serve`, or the lend expired |
 | `403 the jar is locked` | the human locked it; ask them to unlock |
 | `403 unknown or revoked token` | the loan is over; ask for a new one |
+| `403 this token has expired` | ask for `cookiejar token extend`, then keep going |
 | `403 this token may not proxy requests` | the bundle was issued without fetch |
 | `403 ... not covered by this bundle` | the site is outside the bundle; ask for it to be added |
 | `that connect string is damaged` | it was truncated in transit; ask for it again |

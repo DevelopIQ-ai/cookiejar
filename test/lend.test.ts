@@ -103,6 +103,16 @@ test('a bundle can be lent with one command, and taken back with one keystroke',
   const upstream = spawn(process.execPath, [
     '-e',
     `require('http').createServer((q, s) => {
+       if (q.url === '/page') {
+         s.writeHead(200, { 'content-type': 'text/html' });
+         s.end('<html><head><title>Inbox</title><script>var x=1</script></head><body><h1>Two messages</h1></body></html>');
+         return;
+       }
+       if (q.url === '/api') {
+         s.writeHead(401, { 'content-type': 'application/json' });
+         s.end('{"message":"Requires authentication"}');
+         return;
+       }
        s.writeHead(200, { 'set-cookie': 'tracker=should-be-stripped' });
        s.end('cookie: ' + (q.headers.cookie || 'none'));
      }).listen(0, function () { console.log(this.address().port); });`,
@@ -138,6 +148,30 @@ test('a bundle can be lent with one command, and taken back with one keystroke',
 
   const fetched = run(borrower, 'fetch', `http://localhost:${upstreamPort}/`);
   assert.match(fetched, /cookie: session=the-secret-value/, 'the upstream site sees the login');
+
+  // The lender can watch the loan being used, without a cookie value in sight.
+  const watching = spawn(process.execPath, ['--import', 'tsx', cli, 'tail'], { env: env(lender) });
+  let watched = '';
+  watching.stdout.on('data', (chunk: Buffer) => (watched += chunk.toString()));
+  await new Promise((wait) => setTimeout(wait, 500));
+  run(borrower, 'fetch', `http://localhost:${upstreamPort}/watched`);
+  await new Promise((wait) => setTimeout(wait, 1500));
+  watching.kill('SIGINT');
+  assert.match(watched, /bundle_fetch.*\/watched/s, 'tail shows the request as it happens');
+  assert.doesNotMatch(watched, /the-secret-value|cjr_/, 'and nothing secret');
+
+  // --text is what makes a page affordable to read, and --json keeps an API
+  // reply machine-readable even when the host refuses it.
+  const asText = run(borrower, 'fetch', `http://localhost:${upstreamPort}/page`, '--text');
+  assert.match(asText, /# Two messages/);
+  assert.doesNotMatch(asText, /var x=1|<html>/);
+
+  const refused = execFileSync(
+    process.execPath,
+    ['--import', 'tsx', cli, 'fetch', `http://localhost:${upstreamPort}/api`, '--json'],
+    { encoding: 'utf8', env: env(borrower), stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  assert.match(refused, /"message": "Requires authentication"/, 'the body is pretty-printed JSON');
 
   // Proxy only means the borrower cannot pull the values out for itself.
   assert.throws(() => run(borrower, 'export', '--format', 'netscape'), /cannot read cookie values/);

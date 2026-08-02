@@ -86,7 +86,7 @@ export interface VaultData {
 
 export interface AuditEntry {
   at: string;
-  event: 'unlock' | 'unlock_failed' | 'bundle_read' | 'bundle_fetch' | 'grant_created' | 'grant_revoked' | 'bundle_saved' | 'bundle_deleted';
+  event: 'unlock' | 'unlock_failed' | 'bundle_read' | 'bundle_fetch' | 'grant_created' | 'grant_revoked' | 'grant_extended' | 'bundle_saved' | 'bundle_deleted';
   bundleId?: string;
   grantLabel?: string;
   detail?: string;

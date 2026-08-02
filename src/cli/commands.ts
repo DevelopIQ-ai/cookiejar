@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readAudit } from '../core/audit.js';
+import { audit, readAudit } from '../core/audit.js';
+import { playwrightSnippet, writeBrowserState } from '../core/browserstate.js';
 import { installedBrowsers, profileHealth, readAllProfiles, safariAccess, toMeta } from '../core/browsers/index.js';
 import { bareDomain, domainCovers, isExpired, resolveBundle } from '../core/bundles.js';
 import {
@@ -21,7 +22,7 @@ import { decodeConnection, forgetConnection, saveConnection, type Connection } f
 import { keyring } from '../core/keyring.js';
 import { auditPath, vaultPath } from '../core/paths.js';
 import { suggestBundles } from '../core/suggest.js';
-import type { Bundle, BrowserId, CookieMeta } from '../core/types.js';
+import type { AuditEntry, Bundle, BrowserId, CookieMeta } from '../core/types.js';
 import type { Vault } from '../core/vault.js';
 import { ask, confirm } from './prompt.js';
 import { CliError, newPassword } from './vault.js';
@@ -497,6 +498,79 @@ export function activity(limit: number, bundleId?: string): void {
       `${entry.at}  ${pad(entry.event, 16)} ${pad(entry.bundleId ?? '', 24)} ${entry.grantLabel ?? ''} ${entry.detail ?? ''}`.trimEnd(),
     );
   }
+}
+
+/**
+ * The audit log as it happens. Lending is the one moment you want to watch a
+ * remote agent work, and re-running `activity` every few seconds is not that.
+ */
+export function tail(bundleId: string | undefined, signal: { onStop: (stop: () => void) => void }): void {
+  const file = auditPath();
+  const show = (entry: AuditEntry): void => {
+    if (bundleId && entry.bundleId !== bundleId) return;
+    console.log(
+      `${entry.at}  ${pad(entry.event, 16)} ${pad(entry.bundleId ?? '', 24)} ${entry.grantLabel ?? ''} ${entry.detail ?? ''}`.trimEnd(),
+    );
+  };
+  for (const entry of readAudit(20).reverse()) show(entry);
+  console.log(`— watching ${file}${bundleId ? ` for ${bundleId}` : ''}; ctrl-c to stop —`);
+
+  let offset = fs.existsSync(file) ? fs.statSync(file).size : 0;
+  const poll = setInterval(() => {
+    if (!fs.existsSync(file)) return;
+    const size = fs.statSync(file).size;
+    // A reset truncates the log; start over rather than reading garbage.
+    if (size < offset) offset = 0;
+    if (size === offset) return;
+    const handle = fs.openSync(file, 'r');
+    const buffer = Buffer.alloc(size - offset);
+    fs.readSync(handle, buffer, 0, buffer.length, offset);
+    fs.closeSync(handle);
+    offset = size;
+    for (const line of buffer.toString('utf8').split('\n').filter(Boolean)) {
+      try {
+        show(JSON.parse(line) as AuditEntry);
+      } catch {
+        // A half-written line will be complete on the next poll.
+      }
+    }
+  }, 500);
+  signal.onStop(() => clearInterval(poll));
+}
+
+/** Buys a running loan more time without handing out a second token. */
+export function extendGrant(vault: Vault, bundleId: string, tokenId: string | undefined, minutes: number): void {
+  if (!Number.isFinite(minutes) || minutes <= 0) throw new CliError('--minutes must be a positive number');
+  const bundle = vault.bundle(bundleId);
+  const live = bundle.grants.filter(isLive);
+  const grant = tokenId ? live.find((g) => grantId(g).startsWith(tokenId)) : live[live.length - 1];
+  if (!grant) throw new CliError(tokenId ? `no live token ${tokenId} in ${bundleId}` : `no live token in ${bundleId}`);
+  const base = Math.max(grant.expiresAt, Math.floor(Date.now() / 1000));
+  const until = grant.expiresAt === 0 ? 0 : base + minutes * 60;
+  vault.write((data) => {
+    const target = data.bundles
+      .find((b) => b.id === bundleId)!
+      .grants.find((g) => g.tokenHash === grant.tokenHash)!;
+    target.expiresAt = until;
+  });
+  audit({ event: 'grant_extended', bundleId, grantLabel: grant.label, detail: `+${minutes}m` });
+  console.log(
+    until === 0
+      ? `${grantId(grant)} never expires, so there is nothing to extend`
+      : `${grantId(grant)} (${grant.label}) now runs until ${new Date(until * 1000).toLocaleTimeString()}`,
+  );
+  console.log('the agent picks this up on its next request — no reconnect needed');
+}
+
+/** Hands a bundle to Playwright, which is the only way to click things. */
+export function browserHandoff(vault: Vault, bundleId: string, out?: string): void {
+  const bundle = vault.bundle(bundleId);
+  const { cookies } = resolveBundle(bundle);
+  if (cookies.length === 0) throw new CliError(`"${bundle.name}" resolves to no cookies right now — cookiejar bundle ${bundleId}`);
+  const file = writeBrowserState(bundle, out);
+  console.log(`wrote ${file} (0600) — ${cookies.length} cookies, real values`);
+  console.log('this file is a password: it is the session itself, not a proxy to it.\n');
+  console.log(playwrightSnippet(bundle, file));
 }
 
 /** Sets (or replaces) a passphrase on a jar that is already open. */
