@@ -91,7 +91,8 @@ auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 | **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. `cookiejar tokens` (or the Tokens tab) shows every one you ever handed out; revoke one, or revoke every live token at once. |
 | **One-command lending** | `cookiejar lend <bundle> --minutes 60` serves the bundle, tunnels it over HTTPS, mints a short proxy-only token, and prints a single string for a cloud agent. Ctrl-C revokes it. |
 | **Proxy-only mode** | The agent can make authenticated requests through `POST /agent/fetch` but never sees a cookie value. |
-| **MCP, CLI, and HTTP agents** | Tools for `describe_bundle`, `get_cookie_header`, `export_cookies`, `http_request`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
+| **MCP, CLI, and HTTP agents** | `cookiejar mcp --install claude\|cursor\|codex\|vscode` wires a local agent to one bundle with no daemon and no token; tools for `read_page`, `http_request`, `describe_bundle`, `get_cookie_header`, `export_cookies`, `browser_context`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
+| **Pages, not markup** | `read_page` / `cookiejar fetch --text` reduces a logged-in page to readable text with its links, so an agent spends a couple of thousand tokens instead of a couple of hundred thousand. |
 | **Cuts access instantly** | Stop the daemon, revoke a token, lock the jar, or let it auto-lock after 30 idle minutes — every agent loses access on its next request, no restart needed. |
 
 ## Use it with real cookies
@@ -141,7 +142,46 @@ Commit that file and any coding agent that reads skills will know how to call
 `/agent/fetch`, when to prefer a proxy-only token, and that it must never log a
 cookie value.
 
-## Point any coding agent at it
+## Point a coding agent on this machine at it
+
+No daemon, no token: the jar is already here, so one command wires it into your
+client.
+
+```bash
+cookiejar mcp --install claude --bundle work-3f9a   # or cursor, codex, vscode
+```
+
+That writes the config (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, or
+`~/.codex/config.toml`, leaving anything already in it alone) pointing at:
+
+```json
+{
+  "mcpServers": {
+    "cookiejar": {
+      "command": "npx",
+      "args": ["-y", "@puffle/cookiejar", "mcp", "--bundle", "work-3f9a", "--manage"]
+    }
+  }
+}
+```
+
+Tools: `read_page`, `http_request`, `describe_bundle`, `get_cookie_header`,
+`export_cookies`, `browser_context`, plus the bundle-upkeep tools from
+`--manage`. The agent gets that one bundle — not the jar.
+
+`read_page` returns a page as readable text with links kept, usually a tenth to
+a fiftieth of the HTML. `browser_context` writes a Playwright `storageState`
+file (0600, under `~/.cookiejar`) and returns its path, so an agent that needs
+to *click* something drives a browser already signed in:
+
+```bash
+cookiejar browser work-3f9a     # the same handoff, with a snippet to run
+```
+
+That file holds real cookie values, which is why it is local-only and never
+offered to a lent bundle.
+
+## Point an agent somewhere else at it
 
 Start the daemon:
 
@@ -162,8 +202,6 @@ cookiejar serve
   }
 }
 ```
-
-Tools: `describe_bundle`, `get_cookie_header`, `export_cookies`, `http_request`.
 
 **CLI**
 
@@ -212,8 +250,16 @@ connected to "work" · about 60 minutes left
 hosts   github.com, linear.app
 cookies 7, values hidden (proxy only)
 
-$ cookiejar fetch https://linear.app/api/me
+$ cookiejar fetch https://linear.app/api/me --json    # pretty-printed JSON
+$ cookiejar fetch https://linear.app/team/x --text    # the page as readable text
 ```
+
+While it is out, `cookiejar tail` shows every request the borrower makes as it
+happens, and `cookiejar token extend work-3f9a --minutes 30` buys a loan more
+time — the agent picks it up on its next request, with nothing to reconnect.
+When a host answers 401 with the cookies attached, the reply carries a `hint`
+explaining that some sites serve their website from cookies and their API from
+an API key, so an agent stops retrying a bundle that was never at fault.
 
 The connect string is the only thing you send, and it is a credential: it
 carries a bearer token. Ctrl-C on the lending terminal revokes the token and

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- `cookiejar mcp --bundle <id>` serves one bundle over MCP straight from the jar: an agent on your
+  machine needs no daemon, no token and no `serve`. `cookiejar mcp --install claude|cursor|codex|vscode`
+  writes that client's config for you, leaving anything already in it alone.
+- `read_page`, and `cookiejar fetch --text`, return a page as readable text with its links instead of
+  raw HTML — typically a tenth to a fiftieth of the bytes. `cookiejar fetch --json` pretty-prints a
+  JSON reply.
+- `cookiejar browser <bundle>` and the `browser_context` tool write a Playwright `storageState` file
+  (0600) so an agent can drive a browser already signed in. Local bundles only: it contains real
+  cookie values, which a lent, proxy-only bundle must never hand over.
+- A 401 or 403 from a host the bundle covers now comes with a hint, because several sites serve their
+  website from cookies and their API from an API key, and `api.github.com` refusing a browser session
+  is not a broken loan.
+- `cookiejar tail [--bundle <id>]` follows the audit log while a bundle is lent, and
+  `cookiejar token extend <bundle> [<token-id>] --minutes 30` gives a running loan more time — picked
+  up on the borrower's next request, with nothing to reconnect. An expired loan now says what to ask
+  for instead of just 403.
+
 ## 0.4.0 — 2026-08-01
 
 - No more password prompts. A new jar keeps its key in the OS keyring (macOS Keychain, libsecret on

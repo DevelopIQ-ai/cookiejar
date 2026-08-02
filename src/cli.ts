@@ -8,7 +8,9 @@ import { cookieHeaderFor, resolveBundle, toNetscape, toStorageState } from './co
 import { CliError, daemonHoldsVault, openVault } from './cli/vault.js';
 import * as cmd from './cli/commands.js';
 import { lend } from './cli/lend.js';
+import { CLIENTS, installMcpClient, isClient } from './cli/install.js';
 import { loadConnection } from './core/connect.js';
+import { readable } from './core/readable.js';
 import { VERSION } from './core/version.js';
 
 // node:sqlite is how we read cookie stores; its experimental banner is noise here.
@@ -61,6 +63,21 @@ function positional(args: Args, index: number, what: string): string {
   const value = args.rest[index];
   if (!value) throw new CliError(`${what} is required — see cookiejar help`);
   return value;
+}
+
+/**
+ * A refused request is nearly always an expired loan, and "403" alone sends an
+ * agent hunting for a bug that is not there.
+ */
+function expiredHint(status: number, body: string): string {
+  if (status !== 403) return body;
+  if (/expired/i.test(body)) {
+    return `${body}\nAsk the lender for "cookiejar token extend" — or a fresh cookiejar lend — then run cookiejar connect again.`;
+  }
+  if (/revoked|unknown bundle token/i.test(body)) {
+    return `${body}\nThe lender ended this loan. Nothing on your side will bring it back.`;
+  }
+  return body;
 }
 
 /** A token and address from a flag, the environment, or a bundle lent to us. */
@@ -131,8 +148,12 @@ Lending a bundle to an agent somewhere else
   cookiejar lend <bundle> [--minutes 60] [--values] [--local]
       Serve it, tunnel it, mint a short proxy-only token, print one string.
       Ctrl-C revokes the token and takes the address down.
+  cookiejar token extend <bundle> [<token-id>] [--minutes 30]
+      Give a running loan more time; the agent needs no reconnect
+  cookiejar tail [--bundle <id>]        Watch what an agent is doing, live
   cookiejar connect <string>            On the agent's side: check it and remember it
-  cookiejar fetch <url> [--method POST] [--data <body>]  Request a site as the lender
+  cookiejar fetch <url> [--text|--json] [--method POST] [--data <body>]
+      Request a site as the lender. --text strips a page to readable text.
   cookiejar disconnect                  Forget a bundle lent to this machine
 
 Giving a bundle to an agent
@@ -157,12 +178,19 @@ Teaching an agent
   cookiejar skill [--dir <path>] [--force] [--print]
       Write .agents/skills/cookiejar/SKILL.md into this project
 
-Being an agent
+Agents on this machine
+  cookiejar mcp --bundle <id> [--manage]
+      Serve one bundle over MCP straight from the jar: no daemon, no token.
+      --manage also lets the agent edit bundles and issue tokens.
+  cookiejar mcp --install claude|cursor|codex|vscode [--bundle <id>]
+      Write that client's MCP config for you
+  cookiejar browser <bundle> [--out <file>]
+      A Playwright storageState file, for an agent that must click things
+
+Being an agent elsewhere
   cookiejar export [--bundle <id> | --token <token>] [--format netscape|storage-state|json] [--out <file>]
   cookiejar header --url-target <url> [--bundle <id> | --token <token>]
-  cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}] [--manage]
-      --manage also exposes bundle upkeep to an agent on this machine:
-      it can see sites and cookie names, edit bundles, and issue tokens.
+  cookiejar mcp [--token <token>] [--url ${DEFAULT_URL}]
 `;
 
 /** Best effort: the URL is printed either way. */
@@ -221,10 +249,44 @@ async function main(): Promise<void> {
       return;
     }
     case 'mcp': {
+      const install = flagString(args, 'install');
+      const bundleId = flagString(args, 'bundle');
+      if (install) {
+        if (!isClient(install)) throw new CliError(`--install takes one of: ${CLIENTS.join(', ')}`);
+        // Fail before writing a config that points at a bundle which is not there.
+        if (bundleId) (await openVault()).bundle(bundleId);
+        const done = installMcpClient({ client: install, bundleId, dir: flagString(args, 'dir'), name: flagString(args, 'name') });
+        console.log(`${done.created ? 'wrote' : 'updated'} ${done.file} — MCP server "${done.name}"`);
+        if (done.note) console.log(done.note);
+        console.log(bundleId ? `it serves the ${bundleId} bundle; restart the client to pick it up` : 'it can manage bundles; add --bundle <id> to also use one');
+        return;
+      }
       const manage = flagBool(args, 'manage');
       const { url, token } = borrowed(args);
-      if (!manage && !token) requireToken(args);
-      runMcpServer({ daemonUrl: url, token, manage: manage ? await openVault() : undefined });
+      if (!manage && !bundleId && !token) requireToken(args);
+      const vault = manage || bundleId ? await openVault() : undefined;
+      if (bundleId) vault!.bundle(bundleId); // a bad id should fail now, not on the first tool call
+      runMcpServer({
+        daemonUrl: url,
+        token: bundleId ? undefined : token,
+        manage: manage ? vault : undefined,
+        local: bundleId ? { vault: vault!, bundleId } : undefined,
+      });
+      return;
+    }
+    case 'browser': {
+      cmd.browserHandoff(await openVault(), positional(args, 0, 'a bundle id'), flagString(args, 'out'));
+      return;
+    }
+    case 'tail': {
+      cmd.tail(flagString(args, 'bundle'), {
+        onStop: (stop) => {
+          process.on('SIGINT', () => {
+            stop();
+            process.exit(0);
+          });
+        },
+      });
       return;
     }
     case 'lend': {
@@ -247,6 +309,7 @@ async function main(): Promise<void> {
     }
     case 'fetch': {
       const target = positional(args, 0, 'a url');
+      const asText = flagBool(args, 'text');
       const { url } = borrowed(args);
       const response = await fetch(new URL('/agent/fetch', url), {
         method: 'POST',
@@ -255,13 +318,32 @@ async function main(): Promise<void> {
           url: target,
           method: flagString(args, 'method', 'GET'),
           body: flagString(args, 'data'),
+          as: asText ? 'text' : undefined,
         }),
       });
       const text = await response.text();
-      if (!response.ok) throw new CliError(text);
-      const result = JSON.parse(text) as { status: number; body: string };
+      if (!response.ok) throw new CliError(expiredHint(response.status, text));
+      const result = JSON.parse(text) as {
+        status: number;
+        body: string;
+        title?: string;
+        hint?: string;
+        extracted?: { from: number; to: number };
+      };
       if (result.status >= 400) console.error(`upstream returned ${result.status}`);
-      process.stdout.write(result.body);
+      if (result.hint) console.error(`hint: ${result.hint}`);
+      // An older lender does not know --text, so fall back to extracting here.
+      const body = asText && !result.extracted ? readable(result.body).text : result.body;
+      if (asText && result.title) console.error(`title: ${result.title}`);
+      if (flagBool(args, 'json')) {
+        try {
+          console.log(JSON.stringify(JSON.parse(body) as unknown, null, 2));
+          return;
+        } catch {
+          console.error('that response is not JSON; printing it as it came');
+        }
+      }
+      process.stdout.write(body.endsWith('\n') ? body : `${body}\n`);
       return;
     }
     case 'setup': {
@@ -359,6 +441,15 @@ async function main(): Promise<void> {
         });
         return;
       }
+      if (sub === 'extend') {
+        cmd.extendGrant(
+          await openVault(),
+          positional(args, 1, 'a bundle id'),
+          args.rest[2],
+          flagNumber(args, 'minutes', 30),
+        );
+        return;
+      }
       if (sub === 'revoke') {
         const all = args.flags.get('all'); // --all <bundle> parses the id as the flag's value
         if (all !== undefined) {
@@ -368,7 +459,9 @@ async function main(): Promise<void> {
         cmd.revoke(await openVault(), positional(args, 1, 'a bundle id'), positional(args, 2, 'a token id'));
         return;
       }
-      throw new CliError('use: cookiejar token new <bundle> | cookiejar token revoke <bundle> <token-id> | cookiejar token revoke --all');
+      throw new CliError(
+        'use: cookiejar token new <bundle> | cookiejar token extend <bundle> [<token-id>] | cookiejar token revoke <bundle> <token-id> | cookiejar token revoke --all',
+      );
     }
     case 'tokens': {
       cmd.listGrants(await openVault(), { live: flagBool(args, 'live') });
