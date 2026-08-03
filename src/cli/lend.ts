@@ -3,6 +3,7 @@ import { grantId, issueGrant, revokeGrant } from '../core/manage.js';
 import { startTunnel, type Tunnel } from '../core/tunnel.js';
 import { startServer } from '../server/index.js';
 import type { Vault } from '../core/vault.js';
+import { connectCommand, copyToClipboard } from './clipboard.js';
 import { CliError } from './vault.js';
 
 export interface LendOptions {
@@ -13,6 +14,8 @@ export interface LendOptions {
   /** Skip the tunnel: the agent is on this machine. */
   local?: boolean;
   label?: string;
+  /** Copy the runnable borrower command to the local clipboard. */
+  copy?: boolean;
 }
 
 const minutesLeft = (until: number): number => Math.max(0, Math.ceil((until - Date.now()) / 60_000));
@@ -60,9 +63,15 @@ export async function lend(vault: Vault, bundleId: string, opts: LendOptions): P
   const id = grantId(grant);
   const until = Date.now() + opts.minutes * 60_000;
 
+  const connection = encodeConnection({ url: publicUrl, token, bundle: bundle.id, expiresAt: Math.floor(until / 1000) });
+  const command = connectCommand(connection);
+
   console.log(`\n${bundle.name} is lent for ${opts.minutes} minutes${opts.values ? '' : ', proxy only'}. Give the agent this:\n`);
-  console.log(`  ${encodeConnection({ url: publicUrl, token, bundle: bundle.id, expiresAt: Math.floor(until / 1000) })}\n`);
-  console.log(`It runs: cookiejar connect <that string>`);
+  console.log(`  ${connection}\n`);
+  if (opts.copy !== false) {
+    console.log(copyToClipboard(command) ? 'Copied the full connect command to your clipboard.' : 'Clipboard unavailable — copy the full command below.');
+  }
+  console.log(`It runs: ${command}`);
   console.log(
     opts.values
       ? 'The agent can read the cookie values in this bundle.'

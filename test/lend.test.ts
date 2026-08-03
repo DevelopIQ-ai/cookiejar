@@ -121,7 +121,7 @@ test('a bundle can be lent with one command, and taken back with one keystroke',
     upstream.stdout.once('data', (chunk: Buffer) => resolve(chunk.toString().trim())),
   );
 
-  const lending = spawn(process.execPath, ['--import', 'tsx', cli, 'lend', bundleId, '--local', '--minutes', '5'], {
+  const lending = spawn(process.execPath, ['--import', 'tsx', cli, 'lend', bundleId, '--local', '--minutes', '5', '--no-copy'], {
     env: env(lender),
   });
   let out = '';
@@ -139,6 +139,7 @@ test('a bundle can be lent with one command, and taken back with one keystroke',
 
   assert.doesNotMatch(out, /the-secret-value/, 'lending never prints a cookie value');
   assert.match(out, /proxy only/);
+  assert.match(out, /It runs: npx -y @puffle\/cookiejar connect 'cjr1\./, 'the lender prints the full paste-ready command');
 
   // The borrower has a different home: only the connect string crosses over.
   const connected = run(borrower, 'connect', connectString);

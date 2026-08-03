@@ -89,7 +89,7 @@ auto-lock: 30 idle minutes  ·  stop it to cut every agent off
 | **An optional UI** | `cookiejar ui` opens the same jar in a browser on 127.0.0.1: sites, cookie names, bundles, tokens, suggestions. Everything it can do, the terminal can do. It never shows a cookie value either. |
 | **A skill for your agent** | `cookiejar skill` writes `.agents/skills/cookiejar/SKILL.md` into your project, so a coding agent knows how to use a token, and what it must never do with one. |
 | **Per-bundle tokens** | Each token is tied to one bundle, with expiry, a label, use count, and an append-only audit log. `cookiejar tokens` (or the Tokens tab) shows every one you ever handed out; revoke one, or revoke every live token at once. |
-| **One-command lending** | `cookiejar lend <bundle> --minutes 60` serves the bundle, tunnels it over HTTPS, mints a short proxy-only token, and prints a single string for a cloud agent. Ctrl-C revokes it. |
+| **One-command lending** | `cookiejar lend <bundle> --minutes 60` serves the bundle, tunnels it over HTTPS, mints a short proxy-only token, and copies the complete cloud-agent command to your clipboard. Ctrl-C revokes it. |
 | **Proxy-only mode** | The agent can make authenticated requests through `POST /agent/fetch` but never sees a cookie value. |
 | **MCP, CLI, and HTTP agents** | `cookiejar mcp --install claude\|cursor\|codex\|vscode` wires a local agent to one bundle with no daemon and no token; tools for `read_page`, `http_request`, `describe_bundle`, `get_cookie_header`, `export_cookies`, `browser_context`; `cookiejar export` and `header` for shell scripts; a plain REST API when `cookiejar serve` is running. |
 | **Pages, not markup** | `read_page` / `cookiejar fetch --text` reduces a logged-in page to readable text with its links, so an agent spends a couple of thousand tokens instead of a couple of hundred thousand. |
@@ -235,17 +235,19 @@ work is lent for 60 minutes, proxy only. Give the agent this:
 
   cjr1.eyJ1IjoiaHR0cHM6Ly9mcm9zdC1wYW5kYS05eDIudHJ5Y2xvdWRmbGFyZS5jb20i…
 
-It runs: cookiejar connect <that string>
+Copied the full connect command to your clipboard.
+
+It runs: npx -y @puffle/cookiejar connect '<that string>'
 The agent can make requests as you, but never sees a cookie value.
 Ctrl-C revokes it now. Otherwise it dies on its own in 60 minutes.
 ```
 
 That serves the bundle, starts a Cloudflare quick tunnel (fetching a pinned,
 checksum-verified `cloudflared` once if you do not have it), and mints a
-proxy-only token that expires. The agent runs:
+proxy-only token that expires. The agent pastes the copied command:
 
 ```console
-$ cookiejar connect cjr1.…
+$ npx -y @puffle/cookiejar connect 'cjr1.…'
 connected to "work" · about 60 minutes left
 hosts   github.com, linear.app
 cookies 7, values hidden (proxy only)
@@ -261,12 +263,13 @@ When a host answers 401 with the cookies attached, the reply carries a `hint`
 explaining that some sites serve their website from cookies and their API from
 an API key, so an agent stops retrying a bundle that was never at fault.
 
-The connect string is the only thing you send, and it is a credential: it
-carries a bearer token. Ctrl-C on the lending terminal revokes the token and
-takes the address down; so does `cookiejar token revoke --all`.
+The paste-ready command is the only thing you send, and it carries a bearer
+token. Ctrl-C on the lending terminal revokes the token and takes the address
+down; so does `cookiejar token revoke --all`.
 
-Pass `--local` to skip the tunnel (an agent on this machine), or `--values` if
-the agent genuinely needs the raw cookies instead of proxied requests.
+Pass `--local` to skip the tunnel (an agent on this machine), `--no-copy` for
+headless shells, or `--values` if the agent genuinely needs the raw cookies
+instead of proxied requests.
 
 The blunt alternative is still there: `cookiejar export --format storage-state
 --out state.json` and upload it — simplest, but the cookie values leave your

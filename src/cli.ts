@@ -145,8 +145,9 @@ Bundles
   cookiejar bundle rm <id> [--force]
 
 Lending a bundle to an agent somewhere else
-  cookiejar lend <bundle> [--minutes 60] [--values] [--local]
-      Serve it, tunnel it, mint a short proxy-only token, print one string.
+  cookiejar lend <bundle> [--minutes 60] [--values] [--local] [--no-copy]
+      Serve it, tunnel it, mint a short proxy-only token, and copy the full
+      cloud-agent connect command to your clipboard (unless --no-copy).
       Ctrl-C revokes the token and takes the address down.
   cookiejar token extend <bundle> [<token-id>] [--minutes 30]
       Give a running loan more time; the agent needs no reconnect
@@ -296,6 +297,7 @@ async function main(): Promise<void> {
         values: flagBool(args, 'values'),
         local: flagBool(args, 'local'),
         label: flagString(args, 'label'),
+        copy: !flagBool(args, 'no-copy'),
       });
       return;
     }
